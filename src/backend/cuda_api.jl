@@ -45,3 +45,14 @@ end
 function solve_adjoint_compressed_rankchannels_cuda(args...; kwargs...)
     _cuda_unavailable_error("solve_adjoint_compressed_rankchannels_cuda")
 end
+
+# New public MMGNLSE facade hooks.  The CUDA extension adds methods with the
+# same signatures; keeping the fallbacks in the core package lets callers use
+# `backend=:cuda` without making CUDA.jl a required dependency.
+function _mmgnlse_solve_cuda(args...; kwargs...)
+    _cuda_unavailable_error("solve_mmgnlse(...; backend=:cuda)")
+end
+
+function _mmgnlse_solve_adjoint_cuda(args...; kwargs...)
+    _cuda_unavailable_error("solve_adjoint(...; backend=:cuda)")
+end

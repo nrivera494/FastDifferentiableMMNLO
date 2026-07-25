@@ -1,28 +1,28 @@
 abstract type AbstractMaterial end
-struct Silica <: AbstractMaterial end
-Base.@kwdef struct AgarwalRaman{T} <: AbstractMaterial
+struct LegacySilica <: AbstractMaterial end
+Base.@kwdef struct LegacyAgarwalRaman{T} <: AbstractMaterial
     fraction::T = T(0.18)
     tau1_fs::T = T(12.2)
     tau2_fs::T = T(32.0)
     temperature_K::T = T(300.0)
 end
-AgarwalRaman(; fraction=0.18, tau1_fs=12.2, tau2_fs=32.0, temperature_K=300.0) =
-    AgarwalRaman{Float64}(; fraction=Float64(fraction),
+LegacyAgarwalRaman(; fraction=0.18, tau1_fs=12.2, tau2_fs=32.0, temperature_K=300.0) =
+    LegacyAgarwalRaman{Float64}(; fraction=Float64(fraction),
                            tau1_fs=Float64(tau1_fs),
                            tau2_fs=Float64(tau2_fs),
                            temperature_K=Float64(temperature_K))
 struct Chalcogenide <: AbstractMaterial end
 
-material_name(::Silica) = "silica"
-material_name(::AgarwalRaman) = "agarwal"
+material_name(::LegacySilica) = "silica"
+material_name(::LegacyAgarwalRaman) = "agarwal"
 material_name(::Chalcogenide) = "chalcogenide"
-default_raman_fraction(::Silica) = 0.0
-default_raman_fraction(m::AgarwalRaman) = m.fraction
+default_raman_fraction(::LegacySilica) = 0.0
+default_raman_fraction(m::LegacyAgarwalRaman) = m.fraction
 default_raman_fraction(::Chalcogenide) = 0.0
 
 function material_from_string(s::AbstractString)
     s == "silica" && return Silica()
-    s == "agarwal" && return AgarwalRaman()
+    s == "agarwal" && return Silica(; raman=AgarwalRaman())
     s == "chalcogenide" && return Chalcogenide()
     error("Unsupported material string: $s")
 end

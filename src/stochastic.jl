@@ -243,7 +243,7 @@ function stochastic_values(obs::SpectralPhotonNumber, st::StochasticTrajectory; 
         filt = _filter_for_modes(obs.filter, fields_t, obs.modes)
         out[q] = filtered_photon_number(fields_t, objs.ic.dt,
                                                 objs.sim.f0, filt;
-                                                shifted=obs.shifted)
+                                                shifted=true)
     end
     return out
 end
@@ -253,7 +253,7 @@ function stochastic_values(obs::FilterEnergy, st::StochasticTrajectory; z=:final
     out = zeros(Float64, ntraj)
     for q in 1:ntraj
         u = _stochastic_field(st; z=z, trajectory=q, domain=obs.domain)
-        obs.shifted && (u = fftshift(u, 1))
+        obs.domain === :frequency && (u = fftshift(u, 1))
         out[q] = value(obs, u)
     end
     return out

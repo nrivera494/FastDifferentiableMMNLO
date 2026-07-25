@@ -1,7 +1,7 @@
 module PulsePropagationCUDAExt
 
 using CUDA
-using FFTW: fft, ifft, plan_fft!, plan_ifft!
+using FFTW: fft, ifft, ifftshift, plan_fft!, plan_ifft!
 using LinearAlgebra: I, mul!, norm
 using Random
 import PulsePropagation
@@ -38,6 +38,44 @@ struct CUDACPFastRHSCache{T,A,PFM,PIM,PFR,PIR}
     ifft_modes!::PIM
     fft_rank!::PFR
     ifft_rank!::PIR
+end
+
+struct CUDACPAdjointRamanCache{A,PFL,PFU,PFR,PIR,PIT}
+    exp_p::A
+    exp_m::A
+    lambdat::A
+    lambdawc_t::A
+    ut::A
+    rankwork::A
+    term_t::A
+    rhs::A
+    fft_lambdat!::PFL
+    fft_ut!::PFU
+    fft_rank!::PFR
+    ifft_rank!::PIR
+    ifft_term!::PIT
+end
+
+function _cuda_cp_adjoint_raman_cache(nt::Integer, nm::Integer, rank::Integer,
+                                      ::Type{T}) where {T}
+    exp_p = CUDA.zeros(Complex{T}, nt, nm)
+    exp_m = similar(exp_p)
+    lambdat = similar(exp_p)
+    lambdawc_t = similar(exp_p)
+    ut = similar(exp_p)
+    rankwork = CUDA.zeros(Complex{T}, nt, rank)
+    term_t = similar(exp_p)
+    rhs = similar(exp_p)
+    fft_lambdat! = plan_fft!(lambdat, 1)
+    fft_ut! = plan_fft!(ut, 1)
+    fft_rank! = plan_fft!(rankwork, 1)
+    ifft_rank! = plan_ifft!(rankwork, 1)
+    ifft_term! = plan_ifft!(term_t, 1)
+    return CUDACPAdjointRamanCache{typeof(exp_p),typeof(fft_lambdat!),
+                                   typeof(fft_ut!),typeof(fft_rank!),
+                                   typeof(ifft_rank!),typeof(ifft_term!)}(
+        exp_p, exp_m, lambdat, lambdawc_t, ut, rankwork, term_t, rhs,
+        fft_lambdat!, fft_ut!, fft_rank!, ifft_rank!, ifft_term!)
 end
 
 function PulsePropagation.cuda_full_rhs_cache(srsk::PulsePropagation.SRSKInfo{S}, nt::Integer,
@@ -121,15 +159,13 @@ function _normalize_columns_cuda!(A)
 end
 
 function _cp_reconstruct_cuda(λ, U, dims)
-    T = eltype(λ)
-    out = CUDA.zeros(T, dims)
-    for r in eachindex(λ)
-        out .+= λ[r] .* reshape(U[1][:, r], :, 1, 1, 1) .*
-                reshape(U[2][:, r], 1, :, 1, 1) .*
-                reshape(U[3][:, r], 1, 1, :, 1) .*
-                reshape(U[4][:, r], 1, 1, 1, :)
-    end
-    return out
+    rank = length(λ)
+    terms = reshape(λ, 1, 1, 1, 1, rank) .*
+            reshape(U[1], dims[1], 1, 1, 1, rank) .*
+            reshape(U[2], 1, dims[2], 1, 1, rank) .*
+            reshape(U[3], 1, 1, dims[3], 1, rank) .*
+            reshape(U[4], 1, 1, 1, dims[4], rank)
+    return dropdims(sum(terms; dims=5); dims=5)
 end
 
 function PulsePropagation.cp_als_warm_cuda(X::AbstractArray{T,4}, rank::Integer;
@@ -314,8 +350,26 @@ function _cuda_adjoint_full_rhs(lambda_tilde::CUDA.CuMatrix{Complex{T}},
     return term1 .+ one_m_fR .* term2
 end
 
-function _cuda_cp_adjoint_factors(cp, ::Type{T}) where {T}
+function _validated_cuda_adjoint_cp(cp, ::Type{T}) where {T}
     cpd = PulsePropagation._as_cp(cp)
+    all(isreal, cpd.λ) && all(U -> all(isreal, U), cpd.U) || error(
+        "CUDA rank-channel adjoints currently require real CP weights and factors.")
+    nm = size(cpd.U[1], 1)
+    tensor = PulsePropagation.cp_reconstruct(cpd, (nm, nm, nm, nm))
+    tensor_norm = max(norm(tensor), eps(T))
+    symmetry_defect = maximum(
+        norm(tensor .- permutedims(tensor, permutation)) / tensor_norm
+        for permutation in ((2, 1, 3, 4), (1, 3, 2, 4),
+                            (1, 2, 4, 3)))
+    symmetry_defect <= T(1e-5) || error(
+        "CUDA rank-channel adjoints require a permutation-symmetric physical " *
+        "overlap tensor; reconstructed CP symmetry defect $symmetry_defect " *
+        "exceeds 1e-5.")
+    return cpd
+end
+
+function _cuda_cp_adjoint_factors(cp, ::Type{T}) where {T}
+    cpd = _validated_cuda_adjoint_cp(cp, T)
     λ_cpu = Complex{T}.(cpd.λ)
     U4_cpu = Complex{T}.(cpd.U[4])
     λ = CUDA.CuArray(λ_cpu)
@@ -323,8 +377,10 @@ function _cuda_cp_adjoint_factors(cp, ::Type{T}) where {T}
     U2 = CUDA.CuArray(Complex{T}.(cpd.U[2]))
     U3 = CUDA.CuArray(Complex{T}.(cpd.U[3]))
     U4 = CUDA.CuArray(U4_cpu)
+    WU3t = CUDA.CuArray(Matrix(transpose(Complex{T}.(cpd.U[3]) .*
+                                          reshape(λ_cpu, 1, :))))
     WU4t = CUDA.CuArray(Matrix(transpose(U4_cpu .* reshape(λ_cpu, 1, :))))
-    return (; λ, U1, U2, U3, U4, WU4t)
+    return (; λ, U1, U2, U3, U4, WU3t, WU4t)
 end
 
 function _cuda_adjoint_cp_rhs(lambda_tilde::CUDA.CuMatrix{Complex{T}},
@@ -353,6 +409,75 @@ function _cuda_adjoint_cp_rhs(lambda_tilde::CUDA.CuMatrix{Complex{T}},
     term1 = 1im .* exp_m .* ifft(term1_t, 1)
     term2 = -1im .* exp_m .* ifft(term2_t, 1)
     return term1 .+ one_m_fR .* term2
+end
+
+function _cuda_adjoint_cp_raman_rhs(
+    lambda_tilde::CUDA.CuMatrix{Complex{T}},
+    u_tilde::CUDA.CuMatrix{Complex{T}},
+    z::T,
+    d_op::CUDA.CuMatrix{Complex{T}},
+    tau::CUDA.CuVector{T},
+    cp,
+    one_m_fR::T,
+    hR_sigma::CUDA.CuVector{Complex{T}},
+    cache::CUDACPAdjointRamanCache,
+) where {T}
+    nt, nm = size(lambda_tilde)
+    iseven(nt) || error("CUDA Agarwal Raman adjoints require an even time-grid size.")
+    size(u_tilde) == (nt, nm) || error("u_tilde and lambda_tilde must have equal size.")
+    length(hR_sigma) == nt || error("The CUDA Raman response must have length $nt.")
+
+    cache.exp_p .= exp.(d_op .* z)
+    cache.exp_m .= exp.(-d_op .* z)
+
+    cache.lambdat .= cache.exp_p .* lambda_tilde .* reshape(tau, :, 1)
+    cache.fft_lambdat! * cache.lambdat
+    cache.lambdawc_t .= conj.(cache.lambdat)
+    cache.ut .= cache.exp_p .* u_tilde
+    cache.fft_ut! * cache.ut
+
+    B1 = cache.ut * cp.U1
+    B2 = cache.ut * cp.U2
+    C1 = real.(B2 .* conj.(B1))
+    L3 = cache.lambdat * cp.U3
+
+    cache.term_t .= (2 * one_m_fR) .* ((L3 .* Complex{T}.(C1)) * cp.WU4t)
+
+    # fftshift(ifft(X)) == ifft(sigma .* X) for an even-length first axis,
+    # where sigma[k] = (-1)^(k-1).  hR_sigma stores hRω .* sigma.
+    cache.rankwork .= Complex{T}.(C1)
+    cache.fft_rank! * cache.rankwork
+    cache.rankwork .*= reshape(hR_sigma, :, 1)
+    cache.ifft_rank! * cache.rankwork
+    cache.term_t .+= (L3 .* Complex{T}.(real.(cache.rankwork))) * cp.WU4t
+
+    cache.rankwork .= (cache.lambdat * cp.U1) .* (conj.(cache.ut) * cp.U2)
+    cache.ifft_rank! * cache.rankwork
+    cache.rankwork .*= reshape(hR_sigma, :, 1)
+    cache.fft_rank! * cache.rankwork
+    U4u = cache.ut * cp.U4
+    cache.term_t .+= (cache.rankwork .* U4u) * cp.WU3t
+
+    cache.ifft_term! * cache.term_t
+    cache.rhs .= 1im .* cache.exp_m .* cache.term_t
+
+    C2 = B2 .* B1
+    LC3 = cache.lambdawc_t * cp.U3
+    cache.term_t .= (LC3 .* C2) * cp.WU4t
+    cache.ifft_term! * cache.term_t
+    cache.rhs .+= (-1im * one_m_fR) .* cache.exp_m .* cache.term_t
+
+    cache.rankwork .= (cache.lambdawc_t * cp.U1) .* (cache.ut * cp.U2)
+    cache.ifft_rank! * cache.rankwork
+    cache.rankwork .*= reshape(hR_sigma, :, 1)
+    cache.fft_rank! * cache.rankwork
+    cache.term_t .= (cache.rankwork .* U4u) * cp.WU3t
+    cache.ifft_term! * cache.term_t
+    cache.rhs .+= -1im .* cache.exp_m .* cache.term_t
+
+    # The RK4 driver retains four RHS stages, so return a distinct device
+    # allocation while keeping all FFT work arrays and plans cached.
+    return copy(cache.rhs)
 end
 
 function _cuda_interpolate_forward(u_tilde::CUDA.CuArray{Complex{T},3},
@@ -897,19 +1022,72 @@ function PulsePropagation.solve_adjoint_compressed_rankchannels_cuda(
         error("solve_adjoint_compressed_rankchannels_cuda currently supports passive propagation only.")
     forward.linear_gain === nothing ||
         error("solve_adjoint_compressed_rankchannels_cuda does not support linear_gain.")
-    raman in (:none, :off) ||
-        error("solve_adjoint_compressed_rankchannels_cuda currently supports passive Kerr adjoints only; Raman CUDA adjoints are not implemented yet.")
+    raman in (:none, :off, :agarwal) ||
+        error("raman must be :none, :off, or :agarwal for the CUDA rank-channel adjoint.")
     adaptive == false ||
         error("solve_adjoint_compressed_rankchannels_cuda currently uses fixed-step RK4 integration; adaptive=true is not implemented.")
     fields0 = forward.fields[:, :, 1]
+    if sim.include_Raman
+        forward.ode_sol === nothing || error(
+            "CUDA adjoints of Raman-active forward trajectories do not consume a CPU dense interpolant; use the CPU adjoint for trajectories with ode_sol.")
+        return_lambdaw_zsave && error(
+            "CUDA adjoints of Raman-active forward trajectories currently require return_lambdaw_zsave=false so RK4 stages remain aligned with saved forward planes.")
+        gaps = diff(T.(forward.z))
+        isempty(gaps) && error(
+            "CUDA adjoints of Raman-active forward trajectories require at least two saved forward planes.")
+        forward_dz = gaps[1]
+        all(g -> isapprox(g, forward_dz; rtol=T(1e-10), atol=T(1e-12)), gaps) ||
+            error("CUDA adjoints of Raman-active forward trajectories require a uniform saved-forward grid.")
+        isapprox(forward_dz, sim.dz; rtol=T(1e-10), atol=T(1e-12)) || error(
+            "CUDA adjoints of Raman-active forward trajectories require every forward RK4IP step to be saved.")
+        iseven(length(gaps)) || error(
+            "CUDA stage alignment for Raman-active forward trajectories requires an even number of forward intervals.")
+        isapprox(dz_adj, 2forward_dz; rtol=T(1e-10), atol=T(1e-12)) || error(
+            "CUDA adjoints of Raman-active forward trajectories require dz_adj=2*forward_dz so every RK4 stage lies on a saved forward plane.")
+    end
+    if raman === :agarwal
+        sim.include_Raman || error(
+            "CUDA Agarwal-Raman adjoints require Raman in the forward model.")
+        fiber.material == "agarwal" || error(
+            "CUDA Agarwal-Raman adjoints require an Agarwal forward material.")
+        isfinite(raman_fraction) && zero(T) < raman_fraction < one(T) || error(
+            "CUDA Agarwal-Raman adjoints require a finite Raman fraction strictly between zero and one.")
+        isapprox(fiber.fr, raman_fraction; rtol=zero(T), atol=eps(T)) || error(
+            "Forward and adjoint Raman fractions must match.")
+    end
     fiber2 = PulsePropagation.expand_betas_for_polarization(fiber, sim,
                                                             size(fields0, 2))
     c = T(2.99792458e-4)
     omega0 = T(2π) * sim.f0
     scale = fiber2.n2 * omega0 / c
-    cs = PulsePropagation._compressed_bundle(compressed, zero(T))
+    compressed_cp = _validated_cuda_adjoint_cp(compressed, T)
+    cs = PulsePropagation._compressed_bundle(compressed_cp, zero(T))
     gamma_cp = _cuda_cp_adjoint_factors(PulsePropagation._scaled_cp(cs.sk, scale), T)
+    one_m_fR = raman === :agarwal ? one(T) - raman_fraction : one(T)
+    hR_sigma_d = if raman === :agarwal
+        iseven(size(fields0, 1)) ||
+            error("CUDA Agarwal Raman adjoints require an even time-grid size.")
+        hR = PulsePropagation.agarwal_raman_response(size(fields0, 1),
+                                                     forward.dt,
+                                                     raman_fraction)
+        sigma = Complex{T}.(exp.(1im * T(π) .*
+                     repeat(T[zero(T), one(T)], div(size(fields0, 1), 2))))
+        CUDA.CuArray(hR .* sigma)
+    else
+        CUDA.zeros(Complex{T}, 0)
+    end
     rhs_builder = function(d_op_d, tau_d, u_tilde_d, zgrid)
+        if raman === :agarwal
+            cache = _cuda_cp_adjoint_raman_cache(size(fields0, 1),
+                                                 size(fields0, 2),
+                                                 length(gamma_cp.λ), T)
+            return (lambda_state, z) -> begin
+                u_z = _cuda_interpolate_forward(u_tilde_d, zgrid, T(z))
+                _cuda_adjoint_cp_raman_rhs(lambda_state, u_z, T(z), d_op_d,
+                                            tau_d, gamma_cp, one_m_fR,
+                                            hR_sigma_d, cache)
+            end
+        end
         return (lambda_state, z) -> begin
             u_z = _cuda_interpolate_forward(u_tilde_d, zgrid, T(z))
             _cuda_adjoint_cp_rhs(lambda_state, u_z, T(z), d_op_d, tau_d,
@@ -921,5 +1099,7 @@ function PulsePropagation.solve_adjoint_compressed_rankchannels_cuda(
         return_lambdaw_zsave=return_lambdaw_zsave,
         synchronize=synchronize)
 end
+
+include("mmgnlse_cuda.jl")
 
 end

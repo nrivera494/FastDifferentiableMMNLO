@@ -58,7 +58,7 @@ function gradient(problem::PulsePropagationProblem, obs::SpectralPhotonNumber;
         method=method, wrt=wrt, normalization=normalization, trajectory=trajectory)
     method isa Adjoint || error("method must be Adjoint() or AutomaticDifferentiation().")
     sol = trajectory === nothing ? solve(problem) : trajectory
-    terminal = terminal_condition(obs, sol)
+    terminal = ifftshift(terminal_condition(obs, sol), 1)
     fiber, ic, sim, _ = _backend_tuple(problem)
     rf = raman_fraction === nothing ? fiber.fr : raman_fraction
     dz = dz_adj === nothing ? _adjoint_dz(problem, sim) : dz_adj
@@ -122,6 +122,25 @@ function _solve_adjoint_for_gradient(problem::PulsePropagationProblem,
                                      dz_adj=sim.dz,
                                      reltol=1e-10,
                                      abstol=1e-10)
+    raman in (:none, :off, :agarwal, :model, :auto) ||
+        error("raman must be :none, :off, :agarwal, :model, or :auto.")
+    raman_active = raman === :agarwal ||
+                   (raman in (:model, :auto) && sim.include_Raman)
+    cuda_backend = problem.solver.backend isa CUDABackend
+    if cuda_backend && sim.include_Raman && raman in (:none, :off)
+        error("CUDABackend gradients cannot disable the adjoint Raman term for " *
+              "a Raman-active forward trajectory. Use raman=:agarwal (or " *
+              ":auto/:model for an Agarwal material), or use an explicit CPU " *
+              "backend for diagnostic mismatched adjoints.")
+    end
+    cuda_agarwal = raman === :agarwal ||
+                   (raman in (:model, :auto) && sim.include_Raman &&
+                    fiber.material == "agarwal")
+    if cuda_backend && raman_active && !cuda_agarwal
+        error("CUDABackend active-Raman gradients currently support only the " *
+              "Agarwal model. Use an explicit CPU backend for other Raman models.")
+    end
+    cuda_raman = cuda_agarwal ? :agarwal : :off
     compressed = compressed_tensor(sol)
     if compressed === nothing && problem.solver.compression isa CPCompression
         compressed = _resolve_cp_compression(problem.solver.compression, fiber, sim,
@@ -130,9 +149,10 @@ function _solve_adjoint_for_gradient(problem::PulsePropagationProblem,
     if compressed !== nothing
         problem.solver.linear_gain === nothing ||
             error("CPCompression adjoints do not currently support linear_gain.")
-        problem.solver.backend isa CUDABackend && return solve_adjoint_compressed_rankchannels_cuda(
+        cuda_backend &&
+            return solve_adjoint_compressed_rankchannels_cuda(
             terminal, sol.output, fiber, sim, compressed;
-            raman=raman, raman_fraction=raman_fraction,
+            raman=cuda_raman, raman_fraction=raman_fraction,
             return_lambdaw_zsave=return_lambdaw_zsave,
             dz_adj=dz_adj, reltol=reltol, abstol=abstol,
             device=problem.solver.backend.device,
@@ -143,10 +163,14 @@ function _solve_adjoint_for_gradient(problem::PulsePropagationProblem,
             return_lambdaw_zsave=return_lambdaw_zsave,
             dz_adj=dz_adj, reltol=reltol, abstol=abstol)
     else
-        problem.solver.backend isa CUDABackend && return solve_adjoint_cuda(
+        cuda_backend && raman_active && error(
+            "CUDABackend active-Raman gradients require CPCompression; " *
+            "uncompressed active-Raman CUDA adjoints are not implemented.")
+        cuda_backend &&
+            return solve_adjoint_cuda(
             terminal, sol.output, fiber, sim;
             linear_gain=problem.solver.linear_gain,
-            raman=raman, raman_fraction=raman_fraction,
+            raman=cuda_raman, raman_fraction=raman_fraction,
             return_lambdaw_zsave=return_lambdaw_zsave,
             dz_adj=dz_adj, reltol=reltol, abstol=abstol,
             device=problem.solver.backend.device,
@@ -162,12 +186,14 @@ end
 
 function _terminal_condition_for_adjoint(obs::FilterEnergy, sol)
     g = terminal_condition(obs, sol)
-    return _terminal_to_unshifted_fourier(g, obs.domain, obs.shifted)
+    return _terminal_to_unshifted_fourier(g, obs.domain,
+                                           obs.domain === :frequency)
 end
 
 function _terminal_condition_for_adjoint(obs::BinEnergy, sol)
     g = terminal_condition(obs, sol)
-    return _terminal_to_unshifted_fourier(g, obs.domain, obs.shifted)
+    return _terminal_to_unshifted_fourier(g, obs.domain,
+                                           obs.domain === :frequency)
 end
 
 function _terminal_condition_for_adjoint(obs::ProjectedEnergy, sol)
@@ -192,7 +218,7 @@ end
 
 function _terminal_condition_for_adjoint(obs::SpectralMoment, sol)
     g = terminal_condition(obs, sol)
-    return _terminal_to_unshifted_fourier(g, :frequency, obs.shifted)
+    return _terminal_to_unshifted_fourier(g, :frequency, true)
 end
 
 function _terminal_condition_for_adjoint(obs::RatioObservable, sol)
@@ -254,7 +280,7 @@ function _gradient_ad(problem::PulsePropagationProblem, obs::SpectralPhotonNumbe
     filt = _filter_for_modes(obs.filter, last_fields(ic), obs.modes)
     result = output_photon_number_gradient(
         fiber, last_fields(ic), ic.dt, sim, filt;
-        shifted=obs.shifted,
+        shifted=true,
         return_fourier=normalization isa PowerNormalized,
         return_photon_fourier=normalization isa PhotonNormalized)
     g = if normalization isa PhotonNormalized
@@ -327,7 +353,7 @@ function _ad_observable_field(out, domain::Symbol, shifted::Bool)
 end
 
 function _ad_observable_value(obs::FilterEnergy, out, problem)
-    u = _ad_observable_field(out, obs.domain, obs.shifted)
+    u = _ad_observable_field(out, obs.domain, obs.domain === :frequency)
     f = ChainRulesCore.ignore_derivatives() do
         _observable_filter(obs.filter, size(u), obs.modes)
     end
@@ -335,7 +361,8 @@ function _ad_observable_value(obs::FilterEnergy, out, problem)
 end
 
 _ad_observable_value(obs::BinEnergy, out, problem) =
-    value(obs, _ad_observable_field(out, obs.domain, obs.shifted))
+    value(obs, _ad_observable_field(out, obs.domain,
+                                    obs.domain === :frequency))
 
 _ad_observable_value(obs::QuadratureObservable, out, problem) =
     value(obs, _ad_observable_field(out, obs.domain, obs.shifted))
@@ -376,10 +403,10 @@ end
 
 function _ad_observable_value(obs::SpectralMoment, out, problem)
     axis, selected = ChainRulesCore.ignore_derivatives() do
-        frequency_axis(problem.initial_state.grid; shifted=obs.shifted),
+        frequency_axis(problem.initial_state.grid),
         Tuple(_selected_modes(obs.modes, size(out.fields, 2)))
     end
-    return _moment_value_selected(_ad_observable_field(out, :frequency, obs.shifted),
+    return _moment_value_selected(_ad_observable_field(out, :frequency, true),
                                   axis, obs.order, obs.center,
                                   obs.normalized, selected)
 end

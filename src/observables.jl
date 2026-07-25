@@ -1,21 +1,20 @@
 abstract type AbstractObservable end
 
-Base.@kwdef struct SpectralPhotonNumber{F}
+Base.@kwdef struct SpectralPhotonNumber{F} <: AbstractObservable
     filter::F
     modes::Any = :all
-    shifted::Bool = false
 end
 
 function value(obs::SpectralPhotonNumber, sol::PulseTrajectory; z=:final)
     filter = _filter_for_modes(obs.filter, field(sol; z=z, domain=:time), obs.modes)
-    return photon_number(sol, filter; z=z, shifted=obs.shifted)
+    return photon_number(sol, filter; z=z, shifted=true)
 end
 
 function terminal_condition(obs::SpectralPhotonNumber, sol::PulseTrajectory; z=:final)
     fields_t = field(sol; z=z, domain=:time)
-    uω = inverse_fft(fields_t, dims=1)
+    uω = fftshift(inverse_fft(fields_t, dims=1), 1)
     weights = photon_bin_weights(size(fields_t, 1), sol.output.dt,
-                                         _sim(sol).f0; shifted=obs.shifted)
+                                         _sim(sol).f0; shifted=true)
     filt = _filter_for_modes(obs.filter, fields_t, obs.modes)
     return filt .* weights .* uω
 end
@@ -37,19 +36,16 @@ end
 Base.@kwdef struct FilterEnergy{F} <: AbstractObservable
     filter::F
     domain::Symbol = :frequency
-    shifted::Bool = false
     modes::Any = :all
 end
 
 Base.@kwdef struct BinEnergy <: AbstractObservable
     index::Any
     domain::Symbol = :frequency
-    shifted::Bool = false
 end
 
-function BinEnergy(; bin::Integer, mode::Integer=1, domain::Symbol=:frequency,
-                   shifted::Bool=false)
-    return BinEnergy((Int(bin), Int(mode)), domain, shifted)
+function BinEnergy(; bin::Integer, mode::Integer=1, domain::Symbol=:frequency)
+    return BinEnergy((Int(bin), Int(mode)), domain)
 end
 
 Base.@kwdef struct QuadratureObservable{MT} <: AbstractObservable
@@ -86,7 +82,6 @@ Base.@kwdef struct SpectralMoment <: AbstractObservable
     order::Int = 1
     center::Any = 0.0
     normalized::Bool = true
-    shifted::Bool = false
     modes::Any = :all
 end
 
@@ -100,17 +95,19 @@ RatioObservable(numerator, denominator) =
 
 TemporalCentroid(; modes=:all) =
     TemporalMoment(; order=1, center=0.0, normalized=true, modes=modes)
-SpectralCentroid(; shifted::Bool=false, modes=:all) =
-    SpectralMoment(; order=1, center=0.0, normalized=true, shifted=shifted, modes=modes)
+SpectralCentroid(; modes=:all) =
+    SpectralMoment(; order=1, center=0.0, normalized=true, modes=modes)
 
 function value(obs::FilterEnergy, sol::PulseTrajectory; z=:final)
-    u = _observable_field(sol; z=z, domain=obs.domain, shifted=obs.shifted)
+    u = _observable_field(sol; z=z, domain=obs.domain,
+                          shifted=obs.domain === :frequency)
     f = _observable_filter(obs.filter, size(u), obs.modes)
     return real(sum(f .* abs2.(u)))
 end
 
 function terminal_condition(obs::FilterEnergy, sol::PulseTrajectory; z=:final)
-    u = _observable_field(sol; z=z, domain=obs.domain, shifted=obs.shifted)
+    u = _observable_field(sol; z=z, domain=obs.domain,
+                          shifted=obs.domain === :frequency)
     return terminal_condition(obs, u)
 end
 
@@ -125,12 +122,14 @@ function terminal_condition(obs::FilterEnergy, u::AbstractArray)
 end
 
 function value(obs::BinEnergy, sol::PulseTrajectory; z=:final)
-    u = _observable_field(sol; z=z, domain=obs.domain, shifted=obs.shifted)
+    u = _observable_field(sol; z=z, domain=obs.domain,
+                          shifted=obs.domain === :frequency)
     return value(obs, u)
 end
 
 function terminal_condition(obs::BinEnergy, sol::PulseTrajectory; z=:final)
-    u = _observable_field(sol; z=z, domain=obs.domain, shifted=obs.shifted)
+    u = _observable_field(sol; z=z, domain=obs.domain,
+                          shifted=obs.domain === :frequency)
     return terminal_condition(obs, u)
 end
 
@@ -243,14 +242,14 @@ function terminal_condition(obs::TemporalMoment, u::AbstractArray; axis)
 end
 
 function value(obs::SpectralMoment, sol::PulseTrajectory; z=:final)
-    u = _observable_field(sol; z=z, domain=:frequency, shifted=obs.shifted)
-    axis = frequency_axis(sol.problem.initial_state.grid; shifted=obs.shifted)
+    u = _observable_field(sol; z=z, domain=:frequency, shifted=true)
+    axis = frequency_axis(sol.problem.initial_state.grid)
     return value(obs, u; axis=axis)
 end
 
 function terminal_condition(obs::SpectralMoment, sol::PulseTrajectory; z=:final)
-    u = _observable_field(sol; z=z, domain=:frequency, shifted=obs.shifted)
-    axis = frequency_axis(sol.problem.initial_state.grid; shifted=obs.shifted)
+    u = _observable_field(sol; z=z, domain=:frequency, shifted=true)
+    axis = frequency_axis(sol.problem.initial_state.grid)
     return terminal_condition(obs, u; axis=axis)
 end
 

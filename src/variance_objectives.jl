@@ -151,7 +151,7 @@ end
 
 function _variance_terminal_for_adjoint(obs::SpectralPhotonNumber, sol)
     g = terminal_condition(obs, sol)
-    return obs.shifted ? ifftshift(g, 1) : g
+    return ifftshift(g, 1)
 end
 
 _variance_terminal_for_adjoint(obs::AbstractObservable, sol) =
