@@ -45,6 +45,12 @@ Base.@kwdef struct CPCompression
     check_every::Int = 5
     seed::Int = 3
     verbose::Bool = false
+    rank_block_size::Union{Nothing,Int} = nothing
+    max_workspace_bytes::Union{Nothing,Int} = nothing
+    workspace_memory_fraction::Float64 = 0.5
+    reclaim_memory::Bool = true
+    symmetric_source::Bool = false
+    check_symmetry::Bool = true
 end
 
 Base.@kwdef struct CachedCPRHS

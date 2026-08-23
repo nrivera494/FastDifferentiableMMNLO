@@ -51,6 +51,14 @@ function _mode_unfold(X::AbstractArray, n::Integer)
     return reshape(permutedims(X, order), size(X, n), :)
 end
 
+function _mode_unfold!(workspace, X::AbstractArray, n::Integer)
+    order = (n, (k for k in 1:ndims(X) if k != n)...)
+    destination_shape = ntuple(index -> size(X, order[index]), ndims(X))
+    destination = reshape(workspace, destination_shape)
+    permutedims!(destination, X, order)
+    return reshape(destination, size(X, n), :)
+end
+
 function _khatri_rao_rows(factors::Vector{<:AbstractMatrix})
     kr = Array(factors[1])
     R = size(kr, 2)
@@ -64,6 +72,76 @@ function _khatri_rao_rows(factors::Vector{<:AbstractMatrix})
         kr = out
     end
     return kr
+end
+
+function _khatri_rao_rows3!(destination, factors;
+                            conjugate_factors::Bool=false)
+    length(factors) == 3 || throw(ArgumentError(
+        "Fourth-order CP MTTKRP requires exactly three factors."))
+    first_factor, second_factor, third_factor = factors
+    rows1, rank = size(first_factor)
+    rows2 = size(second_factor, 1)
+    rows3 = size(third_factor, 1)
+    size(destination) == (rows1 * rows2 * rows3, rank) ||
+        throw(DimensionMismatch(
+            "Khatri–Rao destination has size $(size(destination)); expected " *
+            "$((rows1 * rows2 * rows3, rank))."))
+    shaped = reshape(destination, rows1, rows2, rows3, rank)
+    if conjugate_factors
+        shaped .= conj.(reshape(first_factor, rows1, 1, 1, rank)) .*
+                  conj.(reshape(second_factor, 1, rows2, 1, rank)) .*
+                  conj.(reshape(third_factor, 1, 1, rows3, rank))
+    else
+        shaped .= reshape(first_factor, rows1, 1, 1, rank) .*
+                  reshape(second_factor, 1, rows2, 1, rank) .*
+                  reshape(third_factor, 1, 1, rows3, rank)
+    end
+    return destination
+end
+
+function _cp_mttkrp_blocked(unfolded, factors, rest,
+                            rank_block_size::Integer;
+                            conjugate_factors::Bool=false)
+    rank = size(factors[1], 2)
+    block = min(Int(rank_block_size), rank)
+    block > 0 || throw(ArgumentError(
+        "rank_block_size must be positive."))
+    result = similar(factors[1], size(unfolded, 1), rank)
+    khatri_rao_workspace = similar(
+        factors[1], size(unfolded, 2), block)
+    for first_column in 1:block:rank
+        last_column = min(first_column + block - 1, rank)
+        columns = first_column:last_column
+        khatri_rao = view(
+            khatri_rao_workspace, :, 1:length(columns))
+        _khatri_rao_rows3!(
+            khatri_rao,
+            [view(factors[index], :, columns) for index in rest];
+            conjugate_factors)
+        mul!(view(result, :, columns), unfolded, khatri_rao)
+    end
+    return result
+end
+
+function _cp_relative_error_from_mttkrp(X, weights, factors,
+                                        rank_block_size::Integer;
+                                        symmetric_source::Bool=false)
+    source_norm2 = sum(abs2, X)
+    source_norm2 == 0 && return 0.0
+    # Mode one is already contiguous in Julia's column-major storage.
+    unfolded = reshape(X, size(X, 1), :)
+    mttkrp = _cp_mttkrp_blocked(
+        unfolded, factors, (2, 3, 4), rank_block_size;
+        conjugate_factors=eltype(X) <: Complex)
+    cross = sum(weights .* vec(sum(conj.(factors[1]) .* mttkrp; dims=1)))
+    gram = ones(promote_type(eltype(weights), eltype(factors[1])),
+                length(weights), length(weights))
+    for factor in factors
+        gram .*= adjoint(factor) * factor
+    end
+    approximation_norm2 = real(dot(weights, gram * weights))
+    residual2 = real(source_norm2 + approximation_norm2 - 2cross)
+    return sqrt(max(Float64(residual2 / source_norm2), 0.0))
 end
 
 function _normalize_columns!(A; floor_norm=eps(real(eltype(A))))
@@ -82,7 +160,8 @@ function _normalize_columns!(A; floor_norm=eps(real(eltype(A))))
 end
 
 function _warm_started_factors(X::AbstractArray{T,4}, rank::Integer;
-                               init=nothing, rng=Random.default_rng()) where {T}
+                               init=nothing, rng=Random.default_rng(),
+                               source_norm=nothing) where {T}
     rank > 0 || error("rank must be positive.")
     U = ntuple(n -> 0.01 .* randn(rng, T, size(X, n), rank), 4)
     λ = ones(T, rank)
@@ -94,14 +173,18 @@ function _warm_started_factors(X::AbstractArray{T,4}, rank::Integer;
         end
         λ[1:r0] .= init_cp.λ[1:r0]
         if r0 < rank
-            scale = (norm(X) / sqrt(rank))^(1 / 4)
+            resolved_source_norm = source_norm === nothing ? norm(X) :
+                                   source_norm
+            scale = (resolved_source_norm / sqrt(rank))^(1 / 4)
             @inbounds for n in 1:4
                 U[n][:, r0+1:rank] .*= scale / T(0.01)
                 _normalize_columns!(view(U[n], :, r0+1:rank))
             end
         end
     else
-        scale = (norm(X) / sqrt(rank))^(1 / 4)
+        resolved_source_norm = source_norm === nothing ? norm(X) :
+                               source_norm
+        scale = (resolved_source_norm / sqrt(rank))^(1 / 4)
         @inbounds for n in 1:4
             U[n] .*= scale / T(0.01)
             _normalize_columns!(U[n])
@@ -122,15 +205,19 @@ used by the earlier notebook-local GCP objects.
 function cp_als_warm(X::AbstractArray{T,4}, rank::Integer;
                      init=nothing, maxiter::Integer=75, tol=1e-5,
                      ridge=T(1e-8), check_every::Integer=5,
-                     rng=Random.default_rng(), verbose::Bool=false) where {T}
+                     rng=Random.default_rng(), verbose::Bool=false,
+                     rank_block_size::Integer=rank,
+                     symmetric_source::Bool=false) where {T}
     Xnorm = norm(X)
     Xnorm > zero(T) || error("Cannot decompose a zero tensor.")
-    λ, U = _warm_started_factors(X, rank; init=init, rng=rng)
+    λ, U = _warm_started_factors(
+        X, rank; init=init, rng=rng, source_norm=Xnorm)
     history = Float64[]
+    unfolding_workspace = symmetric_source ? nothing :
+                          similar(X, length(X))
     for it in 1:maxiter
         for n in 1:4
             rest = [k for k in 1:4 if k != n]
-            KR = _khatri_rao_rows([U[k] for k in rest])
             gram = ones(T, rank, rank)
             for k in rest
                 gram .*= U[k]' * U[k]
@@ -138,12 +225,17 @@ function cp_als_warm(X::AbstractArray{T,4}, rank::Integer;
             @inbounds for r in 1:rank
                 gram[r, r] += ridge
             end
-            U[n] .= (_mode_unfold(X, n) * KR) / gram
+            unfolded = symmetric_source || n == 1 ?
+                         reshape(X, size(X, 1), :) :
+                         _mode_unfold!(unfolding_workspace, X, n)
+            mttkrp = _cp_mttkrp_blocked(
+                unfolded, U, rest, rank_block_size)
+            U[n] .= mttkrp / gram
             λ .= _normalize_columns!(U[n])
         end
         if it == 1 || it % check_every == 0 || it == maxiter
-            cp = CPDecomposition(; λ=copy(λ), U=ntuple(n -> copy(U[n]), 4))
-            err = norm(cp_reconstruct(cp, X) .- X) / Xnorm
+            err = _cp_relative_error_from_mttkrp(
+                X, λ, U, rank_block_size; symmetric_source)
             push!(history, Float64(err))
             verbose && @info "CP-ALS" iter=it rank=rank relerr=err
             if length(history) >= 2 &&
@@ -173,12 +265,18 @@ Build CP decompositions for the unscaled tensors that enter the forward and
 adjoint nonlinearities. `sk` is built with Raman disabled, so the forward
 compressed contraction applies `(1 - fr)` at evaluation time. Raman tensors
 `sra` and `srb` are unscaled; the Raman kernels carry the Raman fraction.
+`rank_block_size` and `max_workspace_bytes` bound the Khatri–Rao temporary;
+`symmetric_source=true` avoids full tensor unfoldings when the generated
+tensors are known to be permutation symmetric.
 """
 function compressed_srsk_tensors(fiber::Fiber{T}, sim::Simulation{T}, rank::Integer;
                                  init=nothing, maxiter::Integer=75, tol=1e-5,
                                  ridge=T(1e-8), check_every::Integer=5,
                                  rng=Random.default_rng(),
-                                 verbose::Bool=false) where {T}
+                                 verbose::Bool=false,
+                                 rank_block_size=nothing,
+                                 max_workspace_bytes=nothing,
+                                 symmetric_source::Bool=false) where {T}
     n = sim.scalar ? size(fiber.sr, 1) : 2 * size(fiber.sr, 1)
     sim_kerr = Simulation{T}(; lambda0=sim.lambda0, f0=sim.f0, dz=sim.dz,
                              save_period=sim.save_period, midx=sim.midx,
@@ -191,9 +289,13 @@ function compressed_srsk_tensors(fiber::Fiber{T}, sim::Simulation{T}, rank::Inte
                              betas=sim.betas, source=sim.source)
     srsk = calc_srsk(fiber, sim_kerr, size(fiber.sr, 1))
     sk_tensor = _dense_tensor(srsk.sk, srsk.sk_indices, n)
+    resolved_rank_block_size = _cp_workspace_limited_rank_block(
+        n, Int(rank), T; rank_block_size, max_workspace_bytes)
     sk_cp, sk_hist = cp_als_warm(sk_tensor, rank; init=init, maxiter=maxiter,
                                  tol=tol, ridge=ridge, check_every=check_every,
-                                 rng=rng, verbose=verbose)
+                                 rng=rng, verbose=verbose,
+                                 rank_block_size=resolved_rank_block_size,
+                                 symmetric_source)
     sra_cp = nothing
     srb_cp = nothing
     histories = Dict(:sk => sk_hist)
@@ -202,14 +304,18 @@ function compressed_srsk_tensors(fiber::Fiber{T}, sim::Simulation{T}, rank::Inte
         sra_cp, sra_hist = cp_als_warm(sra_tensor, rank; init=sk_cp,
                                        maxiter=maxiter, tol=tol, ridge=ridge,
                                        check_every=check_every,
-                                       rng=rng, verbose=verbose)
+                                       rng=rng, verbose=verbose,
+                                       rank_block_size=resolved_rank_block_size,
+                                       symmetric_source)
         histories[:sra] = sra_hist
         if !sim.scalar && !isempty(srsk.srb)
             srb_tensor = _dense_tensor(srsk.srb, srsk.srb_indices, n)
             srb_cp, srb_hist = cp_als_warm(srb_tensor, rank; init=sra_cp,
                                            maxiter=maxiter, tol=tol, ridge=ridge,
                                            check_every=check_every,
-                                           rng=rng, verbose=verbose)
+                                           rng=rng, verbose=verbose,
+                                           rank_block_size=resolved_rank_block_size,
+                                           symmetric_source)
             histories[:srb] = srb_hist
         end
     end

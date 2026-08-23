@@ -342,7 +342,8 @@ mode_grid(properties::FiberProperties) =
     (x=properties.modes.x, y=properties.modes.y)
 mode_fields(properties::FiberProperties) = properties.modes.fields
 propagation_constants(properties::FiberProperties) = properties.modes.beta0
-spatial_overlap(properties::FiberProperties) = properties.S.values
+spatial_overlap(properties::FiberProperties) =
+    properties.S isa SpatialOverlap ? properties.S.values : properties.S
 
 function _normalize_polarization(value)
     symbol = value isa Symbol ? value : Symbol(lowercase(String(value)))
@@ -482,12 +483,391 @@ function _grin_fields(fiber::GRIN, material, labels, basis, x, y)
     return _normalize_modes!(fields, x, y)
 end
 
+function _hermite_polynomial_pair(order::Integer, x)
+    order > 0 || throw(ArgumentError("order must be positive."))
+    previous = one(x)
+    order == 1 && return 2x, previous
+    current = 2x
+    for degree in 1:order-1
+        previous, current =
+            current, 2x * current - 2degree * previous
+    end
+    return current, previous
+end
+
+function _gauss_hermite_rule(order::Integer; precision_bits::Integer=256)
+    order > 0 || throw(ArgumentError(
+        "Gauss-Hermite order must be positive."))
+    precision_bits >= 128 || throw(ArgumentError(
+        "Gauss-Hermite precision_bits must be at least 128."))
+    diagonal = zeros(Float64, order)
+    off_diagonal = sqrt.(collect(1:order-1) ./ 2)
+    decomposition = eigen(SymTridiagonal(diagonal, off_diagonal))
+    initial_nodes = decomposition.values
+    nodes = zeros(Float64, order)
+    weights = zeros(Float64, order)
+
+    setprecision(BigFloat, Int(precision_bits)) do
+        numerator = BigFloat(2)^(order - 1) *
+                    BigFloat(factorial(big(order))) * sqrt(big(pi))
+        half = order ÷ 2
+        for offset in 1:half
+            positive_index = order - offset + 1
+            negative_index = offset
+            root = BigFloat(abs(initial_nodes[positive_index]))
+            for _ in 1:50
+                polynomial, previous = _hermite_polynomial_pair(order, root)
+                correction = polynomial / (2order * previous)
+                root -= correction
+                abs(correction) <= 32eps(BigFloat) * max(abs(root), one(root)) &&
+                    break
+            end
+            _, previous = _hermite_polynomial_pair(order, root)
+            weight = numerator / (BigFloat(order)^2 * previous^2)
+            nodes[negative_index] = -Float64(root)
+            nodes[positive_index] = Float64(root)
+            weights[negative_index] = Float64(weight)
+            weights[positive_index] = Float64(weight)
+        end
+        if isodd(order)
+            center = half + 1
+            root = zero(BigFloat)
+            _, previous = _hermite_polynomial_pair(order, root)
+            nodes[center] = 0.0
+            weights[center] = Float64(
+                numerator / (BigFloat(order)^2 * previous^2))
+        end
+    end
+    return nodes, weights
+end
+
+function _scaled_hermite_values(maximum_order::Integer, nodes)
+    maximum_order >= 0 || throw(ArgumentError(
+        "maximum_order must be nonnegative."))
+    values = zeros(Float64, maximum_order + 1, length(nodes))
+    values[1, :] .= 1
+    maximum_order == 0 && return values
+    values[2, :] .= nodes
+    for order in 1:maximum_order-1
+        values[order + 2, :] .=
+            nodes .* values[order + 1, :] ./ sqrt(order + 1) .-
+            sqrt(order / (order + 1)) .* values[order, :]
+    end
+    return values
+end
+
+"""
+    grin_hg_overlap_quadrature_cp(fiber, num_modes; quadrature_order=48)
+
+Construct the scalar GRIN Hermite-Gaussian overlap tensor directly as a
+fully permutation-symmetric CP quadrature. No dense `num_modes^4` tensor is
+formed. Columns are normalized and the quadrature weights retain the physical
+`m^-2` units of the overlap.
+
+For a basis with maximum total HG order `g`, four-mode products have degree at
+most `4g` in either transverse coordinate. The function therefore requires
+Gauss-Hermite order `2g+1` or greater, which integrates the analytic infinite-
+domain HG overlaps exactly up to floating-point roundoff. For the complete
+190-mode Eslami basis (`g=18`), the minimum exact order is 37.
+"""
+function grin_hg_overlap_quadrature_cp(fiber::GRIN,
+                                       num_modes::Integer;
+                                       quadrature_order::Integer=48,
+                                       precision_bits::Integer=256)
+    num_modes > 0 || throw(ArgumentError("num_modes must be positive."))
+    labels = _grin_hg_labels(Int(num_modes))
+    maximum_order = maximum(label.order for label in labels)
+    minimum_exact_order = 2 * maximum_order + 1
+    quadrature_order >= minimum_exact_order || throw(ArgumentError(
+        "quadrature_order=$quadrature_order is insufficient for maximum HG " *
+        "order $maximum_order; use at least $minimum_exact_order."))
+
+    nodes, node_weights = _gauss_hermite_rule(
+        Int(quadrature_order); precision_bits)
+    hermite_values = _scaled_hermite_values(maximum_order, nodes)
+    source_rank = Int(quadrature_order)^2
+    factor = Matrix{Float64}(undef, Int(num_modes), source_rank)
+    weights = Vector{Float64}(undef, source_rank)
+
+    k0 = 2pi / fiber.lambda0
+    oscillator_q = k0 * fiber.NA / fiber.core_radius
+    overlap_scale = oscillator_q / (2pi^2)
+    column = 0
+    @inbounds for y_node in eachindex(nodes), x_node in eachindex(nodes)
+        column += 1
+        weights[column] = overlap_scale *
+                          node_weights[x_node] * node_weights[y_node]
+        for (mode, label) in enumerate(labels)
+            factor[mode, column] =
+                hermite_values[label.nx + 1, x_node] *
+                hermite_values[label.ny + 1, y_node]
+        end
+    end
+
+    floor_norm = sqrt(eps(Float64))
+    @inbounds for column in axes(factor, 2)
+        column_norm = norm(view(factor, :, column))
+        column_norm > floor_norm || throw(ErrorException(
+            "Gauss-Hermite source column $column has negligible norm."))
+        factor[:, column] ./= column_norm
+        weights[column] *= column_norm^4
+    end
+    factors = ntuple(_ -> copy(factor), 4)
+    return MMGNLSECPDecomposition(weights, factors;
+        layout=:spatial, nmodes=Int(num_modes), npolarizations=1,
+        relative_error=0.0, seed=0, iterations=0, converged=true,
+        zero_tensor=false)
+end
+
+function _gauss_legendre_rule(order::Integer, lower::Real, upper::Real)
+    order >= 2 || throw(ArgumentError(
+        "quadrature_order must be at least two."))
+    isfinite(lower) && isfinite(upper) && lower < upper ||
+        throw(ArgumentError("Quadrature bounds must be finite and increasing."))
+    off_diagonal = [
+        index / sqrt(4index^2 - 1)
+        for index in 1:Int(order)-1
+    ]
+    decomposition = eigen(SymTridiagonal(
+        zeros(Float64, Int(order)), off_diagonal))
+    scale = (float(upper) - float(lower)) / 2
+    shift = (float(upper) + float(lower)) / 2
+    nodes = scale .* decomposition.values .+ shift
+    weights = 2scale .* abs2.(decomposition.vectors[1, :])
+    return nodes, weights
+end
+
+function _uniform_mode_interpolation_indices(axis, nodes, name)
+    step = _uniform_grid_step(axis; name)
+    first_value = first(axis)
+    last_value = last(axis)
+    tolerance = 64eps(float(eltype(axis))) *
+                max(one(float(eltype(axis))), maximum(abs, axis))
+    all(node -> first_value - tolerance <= node <= last_value + tolerance,
+        nodes) || throw(ArgumentError(
+            "$name quadrature nodes lie outside the sampled mode grid."))
+    left = Vector{Int}(undef, length(nodes))
+    fraction = Vector{Float64}(undef, length(nodes))
+    @inbounds for index in eachindex(nodes)
+        coordinate = clamp((nodes[index] - first_value) / step,
+                           0.0, length(axis) - 1.0)
+        left[index] = min(floor(Int, coordinate) + 1, length(axis) - 1)
+        fraction[index] = coordinate - (left[index] - 1)
+    end
+    return left, fraction
+end
+
+@inline function _cubic_mode_interpolate(p0, p1, p2, p3, fraction)
+    t = fraction
+    return 0.5 * (
+        2p1 +
+        (-p0 + p2) * t +
+        (2p0 - 5p1 + 4p2 - p3) * t^2 +
+        (-p0 + 3p1 - 3p2 + p3) * t^3)
+end
+
+
+"""
+    mode_overlap_quadrature_cp(fields, x, y; quadrature_order=48)
+    mode_overlap_quadrature_cp(modes::FiberModeData; quadrature_order=48)
+
+Construct a factorized CP quadrature for the scalar spatial overlap of any
+real sampled mode basis. `fields` has axes `(y, x, mode)` and must be sampled
+on uniform `x` and `y` grids in metres. Tensor-product Gauss--Legendre nodes
+are evaluated by local bicubic interpolation, producing source rank
+`quadrature_order^2` without allocating the dense `Nm^4` overlap tensor.
+
+This is the general sampled-mode counterpart of
+`grin_hg_overlap_quadrature_cp`. It applies to GRIN, step-index, and arbitrary
+finite-difference index profiles, as well as externally supplied real scalar
+modes. Use `cp_compress_mode_overlap` when a convergence-audited compressed
+solver tensor is desired.
+"""
+function mode_overlap_quadrature_cp(
+    fields::AbstractArray{<:Real,3},
+    x::AbstractVector{<:Real},
+    y::AbstractVector{<:Real};
+    quadrature_order::Integer=48,
+)
+    size(fields, 1) == length(y) && size(fields, 2) == length(x) ||
+        throw(DimensionMismatch(
+            "fields must have shape (length(y), length(x), num_modes)."))
+    size(fields, 3) > 0 || throw(ArgumentError(
+        "At least one sampled mode is required."))
+    all(isfinite, fields) || throw(ArgumentError(
+        "Sampled mode fields must be finite."))
+    x_nodes, x_weights = _gauss_legendre_rule(
+        Int(quadrature_order), first(x), last(x))
+    y_nodes, y_weights = _gauss_legendre_rule(
+        Int(quadrature_order), first(y), last(y))
+    x_left, x_fraction = _uniform_mode_interpolation_indices(
+        x, x_nodes, :x)
+    y_left, y_fraction = _uniform_mode_interpolation_indices(
+        y, y_nodes, :y)
+
+    nmodes = size(fields, 3)
+    source_rank = Int(quadrature_order)^2
+    factor = Matrix{Float64}(undef, nmodes, source_rank)
+    weights = Vector{Float64}(undef, source_rank)
+    retained = trues(source_rank)
+    floor_norm = sqrt(eps(Float64))
+    column = 0
+    @inbounds for jy in eachindex(y_nodes), ix in eachindex(x_nodes)
+        column += 1
+        i0, j0 = x_left[ix], y_left[jy]
+        tx, ty = x_fraction[ix], y_fraction[jy]
+        for mode in 1:nmodes
+            y0, y1, y2, y3 = max(j0 - 1, 1), j0, j0 + 1,
+                             min(j0 + 2, length(y))
+            x0, x1, x2, x3 = max(i0 - 1, 1), i0, i0 + 1,
+                             min(i0 + 2, length(x))
+            row0 = _cubic_mode_interpolate(
+                fields[y0, x0, mode], fields[y0, x1, mode],
+                fields[y0, x2, mode], fields[y0, x3, mode], tx)
+            row1 = _cubic_mode_interpolate(
+                fields[y1, x0, mode], fields[y1, x1, mode],
+                fields[y1, x2, mode], fields[y1, x3, mode], tx)
+            row2 = _cubic_mode_interpolate(
+                fields[y2, x0, mode], fields[y2, x1, mode],
+                fields[y2, x2, mode], fields[y2, x3, mode], tx)
+            row3 = _cubic_mode_interpolate(
+                fields[y3, x0, mode], fields[y3, x1, mode],
+                fields[y3, x2, mode], fields[y3, x3, mode], tx)
+            factor[mode, column] = _cubic_mode_interpolate(
+                row0, row1, row2, row3, ty)
+        end
+        column_norm = norm(view(factor, :, column))
+        if column_norm <= floor_norm
+            retained[column] = false
+            weights[column] = 0.0
+        else
+            factor[:, column] ./= column_norm
+            weights[column] = x_weights[ix] * y_weights[jy] * column_norm^4
+        end
+    end
+    any(retained) || throw(ArgumentError(
+        "Every quadrature node has negligible sampled modal amplitude."))
+    retained_factor = factor[:, retained]
+    retained_weights = weights[retained]
+    factors = ntuple(_ -> copy(retained_factor), 4)
+    return MMGNLSECPDecomposition(retained_weights, factors;
+        layout=:spatial, nmodes, npolarizations=1,
+        relative_error=0.0, seed=0, iterations=0, converged=true,
+        zero_tensor=false)
+end
+
+mode_overlap_quadrature_cp(modes::FiberModeData; kwargs...) =
+    mode_overlap_quadrature_cp(
+        modes.fields, modes.x, modes.y; kwargs...)
+
+function mode_overlap_quadrature_cp(
+    fields::AbstractArray{<:Complex,3}, x, y; kwargs...)
+    throw(ArgumentError(
+        "Dense-free factorized compression currently requires real scalar mode fields."))
+end
+
+
+"""
+    cp_compress_mode_overlap(fields, x, y;
+                             target_error, quadrature_order=48,
+                             authority_order=64,
+                             quadrature_tolerance=target_error/10,
+                             backend=:cpu, ...)
+
+Build and compress a sampled-mode overlap without ever materializing its dense
+four-index tensor. A higher-order quadrature authority is constructed first;
+compression proceeds only when the working quadrature differs from it by no
+more than `quadrature_tolerance`. The final CP is then checked directly against
+that authority and must satisfy `target_error`.
+
+All remaining keywords are forwarded to factorized `cp_compress`. The returned
+CP records its total error against the authority, so its `relative_error`
+includes both quadrature and compression error.
+"""
+function cp_compress_mode_overlap(
+    fields::AbstractArray{<:Real,3},
+    x::AbstractVector{<:Real},
+    y::AbstractVector{<:Real};
+    target_error::Real=1e-4,
+    quadrature_order::Integer=48,
+    authority_order::Integer=max(Int(quadrature_order) + 16,
+                                 cld(4 * Int(quadrature_order), 3)),
+    quadrature_tolerance::Real=float(target_error) / 10,
+    backend::Symbol=:cpu,
+    error_block_size::Integer=256,
+    max_rank::Integer=min(size(fields, 3)^2, Int(quadrature_order)^2),
+    min_rank::Integer=1,
+    rank_step::Integer=max(1, cld(Int(max_rank), 16)),
+    kwargs...,
+)
+    0 < target_error < 1 || throw(ArgumentError(
+        "target_error must lie in (0, 1)."))
+    0 <= quadrature_tolerance < target_error || throw(ArgumentError(
+        "quadrature_tolerance must lie in [0, target_error)."))
+    authority_order > quadrature_order || throw(ArgumentError(
+        "authority_order must exceed quadrature_order."))
+    haskey(kwargs, :error) && throw(ArgumentError(
+        "Use target_error, not the cp_compress error alias, with " *
+        "cp_compress_mode_overlap."))
+    working = mode_overlap_quadrature_cp(
+        fields, x, y; quadrature_order)
+    authority = mode_overlap_quadrature_cp(
+        fields, x, y; quadrature_order=authority_order)
+    device_value = haskey(kwargs, :device) ? kwargs[:device] : nothing
+    synchronize_value = haskey(kwargs, :synchronize) ?
+        kwargs[:synchronize] : true
+    quadrature_error = cp_relative_error(
+        working, authority; block_size=error_block_size,
+        backend, device=device_value, synchronize=synchronize_value)
+    quadrature_error <= quadrature_tolerance || throw(ArgumentError(
+        "The sampled-mode quadrature is not converged: working order " *
+        "$quadrature_order differs from authority order $authority_order by " *
+        "$quadrature_error, exceeding quadrature_tolerance=$quadrature_tolerance. " *
+        "Increase the mode-grid resolution and/or quadrature orders."))
+    compression_target = max(
+        float(target_error) - quadrature_error,
+        16eps(Float64))
+    forwarded = (; kwargs...)
+    if !haskey(forwarded, :source_checksum) &&
+       !haskey(forwarded, :checksum_fn)
+        authority_checksum = _canonical_value_checksum((
+            x=collect(x), y=collect(y), fields=Array(fields),
+            quadrature_order=Int(authority_order),
+        ))
+        forwarded = merge((source_checksum=authority_checksum,), forwarded)
+    end
+    compressed = cp_compress(
+        working; target_error=compression_target, backend,
+        error_block_size, max_rank, min_rank, rank_step, forwarded...)
+    total_error = cp_relative_error(
+        compressed, authority; block_size=error_block_size,
+        backend, device=device_value, synchronize=synchronize_value)
+    total_error <= target_error || throw(ErrorException(
+        "Compressed overlap error $total_error exceeds target_error=$target_error " *
+        "against the authority quadrature."))
+    metadata = compressed.metadata
+    return MMGNLSECPDecomposition(
+        compressed.λ, compressed.U;
+        layout=metadata.layout, nmodes=metadata.nmodes,
+        npolarizations=metadata.npolarizations,
+        source_checksum=metadata.source_checksum,
+        relative_error=total_error, seed=compressed.seed,
+        iterations=compressed.iterations, converged=true,
+        zero_tensor=compressed.zero_tensor)
+end
+
+cp_compress_mode_overlap(modes::FiberModeData; kwargs...) =
+    cp_compress_mode_overlap(
+        modes.fields, modes.x, modes.y; kwargs...)
+
 function _step_characteristic(l::Integer, u, V)
     u <= 0 && return SpecialFunctions.besselj(l, zero(u))
     u >= V && return -u * SpecialFunctions.besselj(l + 1, u)
     w = sqrt(max(V^2 - u^2, zero(V)))
-    kl = SpecialFunctions.besselk(l, w)
-    ratio = SpecialFunctions.besselk(l + 1, w) / kl
+    # The common exp(-w) scale cancels in K_(l+1)(w) / K_l(w).
+    # Using the scaled functions prevents underflow for high-V fibers.
+    kl_scaled = SpecialFunctions.besselkx(l, w)
+    ratio = SpecialFunctions.besselkx(l + 1, w) / kl_scaled
     return w * ratio * SpecialFunctions.besselj(l, u) -
            u * SpecialFunctions.besselj(l + 1, u)
 end
@@ -595,14 +975,19 @@ function _step_fields(fiber::StepIndex, labels, x, y)
     @inbounds for (mode, label) in enumerate(labels)
         u = label.u
         w = sqrt(V^2 - u^2)
-        boundary_scale = SpecialFunctions.besselj(label.l, u) /
-                         SpecialFunctions.besselk(label.l, w)
+        boundary_value = SpecialFunctions.besselj(label.l, u)
+        boundary_k_scaled = SpecialFunctions.besselkx(label.l, w)
         for ix in eachindex(x), iy in eachindex(y)
             radius = hypot(x[ix], y[iy])
             angle = atan(y[iy], x[ix])
             rho = radius / fiber.core_radius
-            radial = rho <= 1 ? SpecialFunctions.besselj(label.l, u * rho) :
-                     boundary_scale * SpecialFunctions.besselk(label.l, w * rho)
+            radial = if rho <= 1
+                SpecialFunctions.besselj(label.l, u * rho)
+            else
+                boundary_value *
+                (SpecialFunctions.besselkx(label.l, w * rho) /
+                 boundary_k_scaled) * exp(-w * (rho - 1))
+            end
             angular = label.parity == :axisymmetric ? 1.0 :
                       label.parity == :cos ? cos(label.l * angle) :
                       sin(label.l * angle)
@@ -639,19 +1024,49 @@ function _mode_gram(fields, x, y)
     return adjoint(flat) * flat * (dx * dy)
 end
 
-function _spatial_overlap(fields, x, y; chunk_points=4096)
+function _spatial_overlap(fields, x, y;
+                          chunk_points=4096,
+                          max_workspace_bytes=512 * 1024^2,
+                          precision::Type{<:AbstractFloat}=Float64,
+                          max_tensor_bytes=nothing)
     chunk_points > 0 || throw(ArgumentError("overlap_chunk_points must be positive."))
+    max_workspace_bytes === nothing || max_workspace_bytes > 0 ||
+        throw(ArgumentError(
+            "overlap_max_workspace_bytes must be positive or nothing."))
+    max_tensor_bytes === nothing || max_tensor_bytes > 0 ||
+        throw(ArgumentError(
+            "overlap_max_tensor_bytes must be positive or nothing."))
     dx = _uniform_grid_step(x; name=:x)
     dy = _uniform_grid_step(y; name=:y)
     flat = reshape(fields, :, size(fields, 3))
     points, modes = size(flat)
     pair_count = modes^2
-    T = promote_type(eltype(fields), Float64)
-    gram = zeros(T, pair_count, pair_count)
-    for first_point in 1:chunk_points:points
-        last_point = min(points, first_point + chunk_points - 1)
+    T = eltype(fields) <: Real ? precision : Complex{precision}
+    tensor_bytes = Base.checked_mul(
+        Base.checked_mul(pair_count, pair_count), sizeof(T))
+    if max_tensor_bytes !== nothing && tensor_bytes > max_tensor_bytes
+        throw(ArgumentError(
+            "The dense $modes-mode overlap requires $tensor_bytes bytes, " *
+            "exceeding overlap_max_tensor_bytes=$(Int(max_tensor_bytes)). " *
+            "Use overlap_precision=Float32, raise the limit, or reduce the " *
+            "mode count."))
+    end
+    bytes_per_point = Base.checked_mul(pair_count, sizeof(T))
+    workspace_points = max_workspace_bytes === nothing ? Int(chunk_points) :
+        min(Int(chunk_points), Int(max_workspace_bytes) ÷ bytes_per_point)
+    workspace_points > 0 || throw(ArgumentError(
+        "overlap_max_workspace_bytes=$(Int(max_workspace_bytes)) cannot hold " *
+        "one pair-product row ($bytes_per_point bytes at $modes modes)."))
+
+    real_symmetric = eltype(fields) <: Real
+    tensor = zeros(T, modes, modes, modes, modes)
+    gram = real_symmetric ? reshape(tensor, pair_count, pair_count) :
+           zeros(T, pair_count, pair_count)
+    pairs_workspace = Matrix{T}(undef, workspace_points, pair_count)
+    for first_point in 1:workspace_points:points
+        last_point = min(points, first_point + workspace_points - 1)
         count = last_point - first_point + 1
-        pairs = Matrix{T}(undef, count, pair_count)
+        pairs = @view pairs_workspace[1:count, :]
         column = 0
         for last_mode in 1:modes, first_mode in 1:modes
             column += 1
@@ -664,9 +1079,11 @@ function _spatial_overlap(fields, x, y; chunk_points=4096)
     # gram axes are (output, conjugated-input, first-input, second-input)
     # after the pair-product construction. Restore solver order
     # (output, first-input, second-input, conjugated-input).
-    tensor = permutedims(reshape(gram, modes, modes, modes, modes),
-                         (1, 3, 4, 2))
-    return SpatialOverlap(tensor)
+    if !real_symmetric
+        permutedims!(
+            tensor, reshape(gram, modes, modes, modes, modes), (1, 3, 4, 2))
+    end
+    return SpatialOverlap(tensor; copy_values=false)
 end
 
 function _fd_operator(profile::IndexProfile, material, wavelength)
@@ -814,7 +1231,7 @@ end
 
 function _fiber_config(fiber, material, modes, polarization, basis, beta_order,
                        dispersion_span, dispersion_samples,
-                       dispersion_fit_order)
+                       dispersion_fit_order, overlap_settings)
     core_radius = fiber isa Union{GRIN,StepIndex} ? fiber.core_radius : nothing
     numerical_aperture = fiber isa Union{GRIN,StepIndex} ? fiber.NA : nothing
     wavelength_rule = fiber isa IndexProfile ?
@@ -833,6 +1250,7 @@ function _fiber_config(fiber, material, modes, polarization, basis, beta_order,
         dispersion_span=dispersion_span,
         dispersion_samples=dispersion_samples,
         dispersion_fit_order=dispersion_fit_order,
+        overlap=overlap_settings,
         wavelength_rule=wavelength_rule,
         grid=(nx=length(modes.x), ny=length(modes.y),
               xmin=first(modes.x), xmax=last(modes.x),
@@ -842,7 +1260,8 @@ end
 
 """
     compute_fiber_properties(fiber, material, num_modes, polarization=:scalar;
-                             mode_basis=nothing, beta_order=5, ...)
+                             mode_basis=nothing, beta_order=5,
+                             overlap_representation=:dense, ...)
 
 Build carrier modes, Taylor dispersion, and the dense spatial overlap tensor
 for an analytic GRIN/step-index fiber or a custom finite-difference profile.
@@ -851,6 +1270,16 @@ Modes obey `sum(abs2, mode) * dx * dy == 1`, so `S` has units `m^-2`.
 For GRIN, `mode_basis` must be `:HG` or `:LP`; for StepIndex it is `:LP`;
 custom profiles use `:FD`. `polarization=:linear` records two independent
 linear x/y components while retaining the same scalar spatial modes and `S`.
+Set `overlap_representation=:quadrature_cp` to return an exact factorized
+Gauss--Legendre source on the sampled modes instead of allocating dense `S`;
+`overlap_quadrature_order` controls its one-dimensional order. This source can
+be passed directly to `cp_compress`, or use `cp_compress_mode_overlap` to add
+an authority-order convergence check before compression.
+`overlap_max_workspace_bytes` bounds the pair-product buffer used during
+overlap construction (512 MiB by default), and `overlap_precision=Float32`
+halves dense overlap storage when that accuracy is sufficient.
+`overlap_max_tensor_bytes` optionally rejects an oversized dense `N^4`
+allocation before it is attempted.
 """
 function compute_fiber_properties(fiber::AbstractMMGNLSEFiber, material,
                                   num_modes::Integer,
@@ -862,12 +1291,20 @@ function compute_fiber_properties(fiber::AbstractMMGNLSEFiber, material,
                                   dispersion_fit_order::Integer=min(12, dispersion_samples - 1),
                                   grid_size::Integer=129,
                                   grid_half_width=nothing,
+                                  overlap_representation::Symbol=:dense,
+                                  overlap_quadrature_order::Integer=48,
                                   overlap_chunk_points::Integer=4096,
+                                  overlap_max_workspace_bytes::Union{Nothing,Integer}=512 * 1024^2,
+                                  overlap_precision::Type{<:AbstractFloat}=Float64,
+                                  overlap_max_tensor_bytes::Union{Nothing,Integer}=nothing,
                                   arpack_tol::Real=1e-10,
                                   arpack_maxiter::Integer=5000,
                                   arpack_ncv=nothing,
                                   tracking_padding::Integer=2)
     num_modes > 0 || throw(ArgumentError("num_modes must be positive."))
+    overlap_representation in (:dense, :quadrature_cp) ||
+        throw(ArgumentError(
+            "overlap_representation must be :dense or :quadrature_cp."))
     polarization_value = _normalize_polarization(polarization)
     basis = _normalize_mode_basis(fiber, mode_basis)
     offsets, omega0 = _dispersion_offsets(
@@ -916,11 +1353,28 @@ function compute_fiber_properties(fiber::AbstractMMGNLSEFiber, material,
     modes = FiberModeData(x, y, fields, beta0, labels, fiber.lambda0)
     beta = _fit_taylor_beta(offsets, beta_samples, beta_order,
                             dispersion_fit_order)
-    overlap = _spatial_overlap(fields, x, y;
-                               chunk_points=overlap_chunk_points)
+    overlap = if overlap_representation === :dense
+        _spatial_overlap(fields, x, y;
+                         chunk_points=overlap_chunk_points,
+                         max_workspace_bytes=overlap_max_workspace_bytes,
+                         precision=overlap_precision,
+                         max_tensor_bytes=overlap_max_tensor_bytes)
+    else
+        mode_overlap_quadrature_cp(
+            fields, x, y; quadrature_order=overlap_quadrature_order)
+    end
+    overlap_settings = (
+        representation=overlap_representation,
+        quadrature_order=Int(overlap_quadrature_order),
+        chunk_points=Int(overlap_chunk_points),
+        max_workspace_bytes=overlap_max_workspace_bytes,
+        precision=Symbol(nameof(overlap_precision)),
+        max_tensor_bytes=overlap_max_tensor_bytes,
+    )
     config = _fiber_config(
         fiber, material, modes, polarization_value, basis, beta_order,
-        float(dispersion_span), dispersion_samples, dispersion_fit_order)
+        float(dispersion_span), dispersion_samples, dispersion_fit_order,
+        overlap_settings)
     return FiberProperties(beta, overlap, _material_raman(material), modes,
                            config, _material_n2(material), omega0)
 end

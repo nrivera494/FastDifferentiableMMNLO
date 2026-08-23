@@ -1,8 +1,8 @@
 module PulsePropagationCUDAExt
 
 using CUDA
-using FFTW: fft, ifft, ifftshift, plan_fft!, plan_ifft!
-using LinearAlgebra: I, mul!, norm
+using FFTW: fft, ifft, ifftshift, plan_fft!, plan_ifft!, plan_rfft, plan_irfft
+using LinearAlgebra: I, dot, mul!, norm
 using Random
 import PulsePropagation
 
@@ -139,16 +139,232 @@ function _mode_unfold_cuda(X, n::Integer)
     return reshape(permutedims(X, order), size(X, n), :)
 end
 
-function _khatri_rao_rows_cuda(factors)
-    kr = factors[1]
-    R = size(kr, 2)
-    for F in factors[2:end]
-        old_rows = size(kr, 1)
-        new_rows = size(F, 1)
-        kr = reshape(reshape(kr, old_rows, 1, R) .* reshape(F, 1, new_rows, R),
-                     old_rows * new_rows, R)
+function _mode_unfold_cuda!(workspace, X, n::Integer)
+    order = (n, (k for k in 1:ndims(X) if k != n)...)
+    destination_shape = ntuple(index -> size(X, order[index]), ndims(X))
+    destination = reshape(workspace, destination_shape)
+    permutedims!(destination, X, order)
+    return reshape(destination, size(X, n), :)
+end
+
+function _check_cuda_unfolding_addressability(X, symmetric_source::Bool)
+    if !symmetric_source && length(X) > typemax(Cint)
+        throw(ArgumentError(
+            "The nonsymmetric CUDA CP path cannot safely permute a tensor " *
+            "with $(length(X)) elements; the current CUDA permutation " *
+            "backend is limited to $(typemax(Cint)) elements (215^4 fits, " *
+            "216^4 does not). For a fully permutation-symmetric overlap, " *
+            "set symmetric_source=true; otherwise use backend=:cpu or " *
+            "reduce the mode count."))
     end
-    return kr
+    return nothing
+end
+
+function _cuda_complex_source(X, ::Type{CT};
+                              staging_bytes::Integer=64 * 1024^2) where {CT<:Complex}
+    if X isa CUDA.CuArray{CT,4}
+        return X
+    elseif X isa CUDA.CuArray
+        return CT.(X)
+    elseif eltype(X) === CT
+        return CUDA.CuArray(X)
+    end
+
+    destination = CUDA.CuArray{CT}(undef, size(X))
+    source_flat = reshape(X, :)
+    destination_flat = reshape(destination, :)
+    source_eltype = eltype(X)
+    staging_elements = min(
+        length(source_flat),
+        max(1, Int(staging_bytes) ÷ sizeof(source_eltype)))
+    staging = CUDA.CuArray{source_eltype}(undef, staging_elements)
+    GC.@preserve destination begin
+        for first_element in 1:staging_elements:length(source_flat)
+            last_element = min(
+                first_element + staging_elements - 1,
+                length(source_flat))
+            count = last_element - first_element + 1
+            source_range = first_element:last_element
+            staging_view = view(staging, 1:count)
+            copyto!(staging, 1, source_flat, first_element, count)
+            view(destination_flat, source_range) .= CT.(staging_view)
+        end
+        CUDA.synchronize()
+        staging = nothing
+        GC.gc(false)
+        CUDA.reclaim()
+    end
+    return destination
+end
+
+function PulsePropagation._cp_cuda_memory_status(;
+    device=nothing,
+    reclaim_memory::Bool=true,
+)
+    CUDA.functional() || Base.error(
+        "CUDA.jl is available but no functional CUDA device was found.")
+    device === nothing || CUDA.device!(device)
+    reclaim_memory && CUDA.reclaim()
+    cached = Int(coalesce(CUDA.cached_memory(), 0))
+    used = Int(coalesce(CUDA.used_memory(), 0))
+    reclaimable = max(cached - used, 0)
+    raw_free = Int(CUDA.free_memory())
+    return (;
+        available_bytes=Base.checked_add(raw_free, reclaimable),
+        raw_free_bytes=raw_free,
+        reclaimable_bytes=reclaimable,
+    )
+end
+
+function PulsePropagation._cp_prepare_bounded_cuda_source(
+    S::AbstractArray{<:Number,4},
+    ::Type{CT};
+    device=nothing,
+) where {CT<:Complex}
+    CUDA.functional() || Base.error(
+        "CUDA.jl is available but no functional CUDA device was found.")
+    device === nothing || CUDA.device!(device)
+    return _cuda_complex_source(S, CT)
+end
+
+function _khatri_rao_rows_cuda!(destination, factors;
+                                conjugate_factors::Bool=false)
+    length(factors) == 3 || throw(ArgumentError(
+        "Fourth-order CP MTTKRP requires exactly three factors."))
+    first_factor, second_factor, third_factor = factors
+    rows1, rank = size(first_factor)
+    rows2 = size(second_factor, 1)
+    rows3 = size(third_factor, 1)
+    size(destination) == (rows1 * rows2 * rows3, rank) ||
+        throw(DimensionMismatch(
+            "Khatri–Rao destination has size $(size(destination)); expected " *
+            "$((rows1 * rows2 * rows3, rank))."))
+    shaped_destination = reshape(
+        destination, rows1, rows2, rows3, rank)
+    if conjugate_factors
+        shaped_destination .=
+            conj.(reshape(first_factor, rows1, 1, 1, rank)) .*
+            conj.(reshape(second_factor, 1, rows2, 1, rank)) .*
+            conj.(reshape(third_factor, 1, 1, rows3, rank))
+        return destination
+    end
+    shaped_destination .=
+        reshape(first_factor, rows1, 1, 1, rank) .*
+        reshape(second_factor, 1, rows2, 1, rank) .*
+        reshape(third_factor, 1, 1, rows3, rank)
+    return destination
+end
+
+function _cp_mttkrp_cuda(unfolded, factors, rest,
+                         rank_block_size::Integer;
+                         conjugate_factors::Bool=false)
+    rank = size(factors[1], 2)
+    block = min(Int(rank_block_size), rank)
+    block > 0 || throw(ArgumentError(
+        "rank_block_size must be positive."))
+    result = similar(factors[1], size(unfolded, 1), rank)
+    khatri_rao_workspace = similar(
+        factors[1], size(unfolded, 2), block)
+    for first_column in 1:block:rank
+        last_column = min(first_column + block - 1, rank)
+        columns = first_column:last_column
+        khatri_rao = view(
+            khatri_rao_workspace, :, 1:length(columns))
+        _khatri_rao_rows_cuda!(
+            khatri_rao,
+            [view(factors[index], :, columns) for index in rest];
+            conjugate_factors)
+        destination = view(result, :, columns)
+        # The classic cuBLAS interface uses 32-bit matrix dimensions/offsets.
+        # A mode unfolding can exceed 2^31 elements well before it exhausts an
+        # 80 GiB GPU. Split only the inner dimension in that case and retain
+        # the same blocked Khatri–Rao workspace.
+        maximum_inner = max(
+            1, typemax(Cint) ÷ max(size(unfolded, 1), 1))
+        if eltype(unfolded) <: Complex &&
+           size(unfolded, 2) > maximum_inner
+            first_inner = true
+            for first_row in 1:maximum_inner:size(unfolded, 2)
+                last_row = min(
+                    first_row + maximum_inner - 1,
+                    size(unfolded, 2))
+                inner_rows = first_row:last_row
+                mul!(
+                    destination,
+                    view(unfolded, :, inner_rows),
+                    view(khatri_rao, inner_rows, :),
+                    one(eltype(destination)),
+                    first_inner ? zero(eltype(destination)) :
+                                  one(eltype(destination)),
+                )
+                first_inner = false
+            end
+        else
+            mul!(destination, unfolded, khatri_rao)
+        end
+    end
+    return result
+end
+
+function _cuda_cp_rank_block_size(nmodes::Int, rank::Int, ::Type{T};
+                                  rank_block_size=nothing,
+                                  max_workspace_bytes=nothing,
+                                  workspace_memory_fraction::Real=0.5,
+                                  reclaim_memory::Bool=true,
+                                  reserve_unfolding::Bool=false) where {T}
+    PulsePropagation._cp_validate_memory_controls(
+        rank_block_size, max_workspace_bytes, workspace_memory_fraction)
+    reclaim_memory && CUDA.reclaim()
+    cached = coalesce(CUDA.cached_memory(), 0)
+    used = coalesce(CUDA.used_memory(), 0)
+    reclaimable = max(cached - used, 0)
+    available = CUDA.free_memory() + reclaimable
+    unfolding_bytes = reserve_unfolding ? Base.checked_mul(
+        Base.checked_mul(
+            Base.checked_mul(
+                Base.checked_mul(nmodes, nmodes), nmodes), nmodes),
+        sizeof(T)) : 0
+    available_for_khatri_rao = available - unfolding_bytes
+    available_for_khatri_rao > 0 || throw(ArgumentError(
+        "The generic CUDA CP path needs a $unfolding_bytes-byte mode " *
+        "unfolding in addition to the resident source, but only $available " *
+        "bytes are currently available. For a permutation-symmetric overlap, " *
+        "set symmetric_source=true; otherwise use lower precision or fewer modes."))
+    fraction_budget = min(
+        floor(Int, workspace_memory_fraction * available),
+        available_for_khatri_rao)
+    budget = max_workspace_bytes === nothing ? fraction_budget :
+             min(fraction_budget, Int(max_workspace_bytes))
+    bytes_per_column = Base.checked_mul(
+        Base.checked_mul(Base.checked_mul(nmodes, nmodes), nmodes), sizeof(T))
+    affordable = budget ÷ bytes_per_column
+    affordable > 0 || throw(ArgumentError(
+        "The CUDA CP workspace budget ($budget bytes) cannot hold one " *
+        "Khatri–Rao rank column ($bytes_per_column bytes at $nmodes modes). " *
+        "Increase max_workspace_bytes/workspace_memory_fraction, use lower " *
+        "precision, or reduce the mode count."))
+    requested = rank_block_size === nothing ? rank : Int(rank_block_size)
+    return min(rank, requested, affordable), budget, bytes_per_column
+end
+
+function _cp_relative_error_cuda(source, source_norm2, weights, factors,
+                                 rank_block_size::Integer;
+                                 symmetric_source::Bool=false)
+    # Mode one is already contiguous in Julia's column-major storage.  Using
+    # permutedims here would allocate an unnecessary second full tensor.
+    unfolded = reshape(source, size(source, 1), :)
+    mttkrp = _cp_mttkrp_cuda(
+        unfolded, factors, (2, 3, 4), rank_block_size;
+        conjugate_factors=eltype(source) <: Complex)
+    cross = sum(weights .* vec(sum(conj.(factors[1]) .* mttkrp; dims=1)))
+    gram = CUDA.ones(eltype(factors[1]), length(weights), length(weights))
+    for factor in factors
+        gram .*= adjoint(factor) * factor
+    end
+    gram_weights = eltype(gram).(weights)
+    approximation_norm2 = real(dot(gram_weights, gram * gram_weights))
+    residual2 = real(source_norm2 + approximation_norm2 - 2cross)
+    return sqrt(max(Float64(residual2 / source_norm2), 0.0))
 end
 
 function _normalize_columns_cuda!(A)
@@ -158,16 +374,6 @@ function _normalize_columns_cuda!(A)
     return Array(safe)
 end
 
-function _cp_reconstruct_cuda(λ, U, dims)
-    rank = length(λ)
-    terms = reshape(λ, 1, 1, 1, 1, rank) .*
-            reshape(U[1], dims[1], 1, 1, 1, rank) .*
-            reshape(U[2], 1, dims[2], 1, 1, rank) .*
-            reshape(U[3], 1, 1, dims[3], 1, rank) .*
-            reshape(U[4], 1, 1, 1, dims[4], rank)
-    return dropdims(sum(terms; dims=5); dims=5)
-end
-
 function PulsePropagation.cp_als_warm_cuda(X::AbstractArray{T,4}, rank::Integer;
                                            init=nothing, maxiter::Integer=75,
                                            tol=1e-5, ridge=T(1e-8),
@@ -175,32 +381,59 @@ function PulsePropagation.cp_als_warm_cuda(X::AbstractArray{T,4}, rank::Integer;
                                            rng=Random.default_rng(),
                                            verbose::Bool=false,
                                            device=nothing,
-                                           synchronize::Bool=true) where {T}
+                                           synchronize::Bool=true,
+                                           rank_block_size=nothing,
+                                           max_workspace_bytes=nothing,
+                                           workspace_memory_fraction::Real=0.5,
+                                           reclaim_memory::Bool=true,
+                                           symmetric_source::Bool=false) where {T}
     CUDA.functional() || error("CUDA.jl is available but no functional CUDA device was found.")
     device === nothing || CUDA.device!(device)
     rank > 0 || error("rank must be positive.")
-    Xd = CUDA.CuArray(T.(X))
-    Xnorm = norm(Xd)
+    _check_cuda_unfolding_addressability(X, symmetric_source)
+    Xd = X isa CUDA.CuArray{T,4} ? X : CUDA.CuArray(T.(X))
+    # cuBLAS nrm2 takes a 32-bit vector length and is unsafe once the source
+    # tensor exceeds 2^31 elements. CUDA.jl's reduction remains valid there.
+    Xnorm = sqrt(sum(abs2, Xd))
     Xnorm > zero(T) || error("Cannot decompose a zero tensor.")
 
-    λ_cpu, U_cpu = PulsePropagation._warm_started_factors(T.(X), rank; init=init, rng=rng)
+    λ_cpu, U_cpu = PulsePropagation._warm_started_factors(
+        X, rank; init=init, rng=rng, source_norm=Xnorm)
     λ = CUDA.CuArray(T.(λ_cpu))
     U = [CUDA.CuArray(T.(U_cpu[n])) for n in 1:4]
+    resolved_block, workspace_budget, bytes_per_column =
+        _cuda_cp_rank_block_size(
+            size(X, 1), Int(rank), T;
+            rank_block_size,
+            max_workspace_bytes,
+            workspace_memory_fraction,
+            reclaim_memory,
+            reserve_unfolding=!symmetric_source)
+    if verbose
+        @info "CUDA CP workspace" rank=rank rank_block_size=resolved_block workspace_budget_bytes=workspace_budget bytes_per_rank_column=bytes_per_column symmetric_source
+    end
     history = Float64[]
+    unfolding_workspace = symmetric_source ? nothing :
+                          similar(Xd, length(Xd))
     for it in 1:maxiter
         for n in 1:4
             rest = [k for k in 1:4 if k != n]
-            KR = _khatri_rao_rows_cuda([U[k] for k in rest])
             gram = CUDA.ones(T, rank, rank)
             for k in rest
                 gram .*= U[k]' * U[k]
             end
             gram .+= CUDA.CuArray(ridge .* Matrix{T}(I, rank, rank))
-            U[n] = (_mode_unfold_cuda(Xd, n) * KR) / gram
+            unfolded = symmetric_source || n == 1 ?
+                         reshape(Xd, size(Xd, 1), :) :
+                         _mode_unfold_cuda!(unfolding_workspace, Xd, n)
+            mttkrp = _cp_mttkrp_cuda(
+                unfolded, U, rest, resolved_block)
+            U[n] = mttkrp / gram
             λ .= CUDA.CuArray(_normalize_columns_cuda!(U[n]))
         end
         if it == 1 || it % check_every == 0 || it == maxiter
-            err = norm(_cp_reconstruct_cuda(λ, U, size(X)) .- Xd) / Xnorm
+            err = _cp_relative_error_cuda(
+                Xd, Xnorm^2, λ, U, resolved_block; symmetric_source)
             synchronize && CUDA.synchronize()
             push!(history, Float64(err))
             verbose && @info "CUDA CP-ALS" iter=it rank=rank relerr=err
@@ -215,6 +448,605 @@ function PulsePropagation.cp_als_warm_cuda(X::AbstractArray{T,4}, rank::Integer;
         U=ntuple(n -> Array(U[n]), 4),
     )
     return cp, history
+end
+
+function _normalize_mmgnlse_cp_columns_cuda!(factor, floor_norm)
+    norms = vec(sqrt.(sum(abs2, factor; dims=1)))
+    safe = ifelse.(norms .<= floor_norm, one(eltype(norms)), norms)
+    factor ./= reshape(safe, 1, :)
+    return safe
+end
+
+function _cp_factorized_mttkrp_cuda(source_weights, source_factors,
+                                    target_factors, mode::Int)
+    source_rank = length(source_weights)
+    target_rank = size(target_factors[1], 2)
+    T = eltype(source_weights)
+    cross = CUDA.ones(T, source_rank, target_rank)
+    for other_mode in 1:4
+        other_mode == mode && continue
+        cross .*= transpose(source_factors[other_mode]) *
+                  target_factors[other_mode]
+    end
+    cross .*= reshape(source_weights, :, 1)
+    return source_factors[mode] * cross
+end
+
+function _cp_factorized_inner_product_cuda(left_weights, left_factors,
+                                           right_weights, right_factors;
+                                           block_size::Integer,
+                                           tied::Bool=false)
+    (isempty(left_weights) || isempty(right_weights)) &&
+        return zero(eltype(left_weights))
+    result = zero(promote_type(eltype(left_weights), eltype(right_weights)))
+    right_rank = length(right_weights)
+    for first_column in 1:Int(block_size):right_rank
+        last_column = min(first_column + Int(block_size) - 1, right_rank)
+        columns = first_column:last_column
+        cross = CUDA.ones(
+            eltype(left_weights), length(left_weights), length(columns))
+        if tied
+            cross .= transpose(left_factors[1]) *
+                     view(right_factors[1], :, columns)
+            cross .^= 4
+        else
+            for mode in 1:4
+                cross .*= transpose(left_factors[mode]) *
+                          view(right_factors[mode], :, columns)
+            end
+        end
+        result += dot(left_weights, cross * view(right_weights, columns))
+    end
+    return result
+end
+
+function PulsePropagation._cp_relative_error_factorized_cuda(
+    candidate::PulsePropagation.MMGNLSECPDecomposition,
+    reference::PulsePropagation.MMGNLSECPDecomposition;
+    block_size::Integer=256,
+    device=nothing,
+    synchronize::Bool=true,
+)
+    CUDA.functional() || error(
+        "CUDA.jl is available but no functional CUDA device was found.")
+    device === nothing || CUDA.device!(device)
+    PulsePropagation._cp_require_compatible(candidate, reference)
+    candidate_weights_cpu, candidate_factors_cpu =
+        PulsePropagation._cp_real_factorized_source(candidate)
+    reference_weights_cpu, reference_factors_cpu =
+        PulsePropagation._cp_real_factorized_source(reference)
+    candidate_tied = all(
+        factor -> factor == candidate_factors_cpu[1],
+        candidate_factors_cpu[2:4])
+    reference_tied = all(
+        factor -> factor == reference_factors_cpu[1],
+        reference_factors_cpu[2:4])
+    candidate_weights = CUDA.CuArray(candidate_weights_cpu)
+    reference_weights = CUDA.CuArray(reference_weights_cpu)
+    candidate_factors = [CUDA.CuArray(factor) for factor in candidate_factors_cpu]
+    reference_factors = [CUDA.CuArray(factor) for factor in reference_factors_cpu]
+    reference_norm_squared = real(_cp_factorized_inner_product_cuda(
+        reference_weights, reference_factors,
+        reference_weights, reference_factors;
+        block_size, tied=reference_tied))
+    reference_norm_squared > 0 ||
+        return PulsePropagation.cp_iszero(candidate) ? 0.0 : Inf
+    candidate_norm_squared = real(_cp_factorized_inner_product_cuda(
+        candidate_weights, candidate_factors,
+        candidate_weights, candidate_factors;
+        block_size, tied=candidate_tied))
+    cross = _cp_factorized_inner_product_cuda(
+        reference_weights, reference_factors,
+        candidate_weights, candidate_factors;
+        block_size, tied=reference_tied && candidate_tied)
+    synchronize && CUDA.synchronize()
+    residual_squared = reference_norm_squared + candidate_norm_squared -
+                       2real(cross)
+    return sqrt(max(
+        Float64(residual_squared / reference_norm_squared), 0.0))
+end
+
+function _cp_factorized_relative_error_cuda(
+    source_weights, source_factors, source_norm_squared,
+    target_weights, target_factors; block_size::Integer)
+    target_norm_squared = real(_cp_factorized_inner_product_cuda(
+        target_weights, target_factors, target_weights, target_factors;
+        block_size))
+    cross = _cp_factorized_inner_product_cuda(
+        source_weights, source_factors, target_weights, target_factors;
+        block_size)
+    residual_squared = source_norm_squared + target_norm_squared - 2real(cross)
+    return sqrt(max(Float64(residual_squared / source_norm_squared), 0.0))
+end
+
+function _cp_als_factorized_real_cuda(source_weights, source_factors,
+                                      rank::Integer;
+                                      seed::Integer,
+                                      initial=nothing,
+                                      maxiter::Integer,
+                                      tolerance::Real,
+                                      ridge::Real,
+                                      check_every::Integer,
+                                      target_error::Real,
+                                      source_norm_squared,
+                                      synchronize::Bool,
+                                      error_block_size::Integer,
+                                      verbose::Bool)
+    r = Int(rank)
+    RT = eltype(source_weights)
+    dims = ntuple(mode -> size(source_factors[mode], 1), 4)
+    rng = Random.MersenneTwister(Int(seed))
+    factors_cpu = PulsePropagation._cp_real_random_factors(
+        rng, RT, dims, r; initial)
+    factors = [CUDA.CuArray(factor) for factor in factors_cpu]
+    weights = CUDA.ones(RT, r)
+    source_norm_squared > zero(RT) || throw(ArgumentError(
+        "Use factorized CP compression only for a nonzero source."))
+    identity_matrix = CUDA.CuArray(Matrix{RT}(I, r, r))
+    floor_norm = sqrt(eps(RT))
+    history = Float64[]
+    previous_error = Inf
+    converged = false
+    iterations = 0
+
+    for iteration in 1:Int(maxiter)
+        iterations = iteration
+        for mode in 1:4
+            gram = CUDA.ones(RT, r, r)
+            for other_mode in 1:4
+                other_mode == mode && continue
+                gram .*= transpose(factors[other_mode]) *
+                         factors[other_mode]
+            end
+            ridge_scale = max(maximum(abs, gram), one(RT))
+            gram .+= RT(ridge) * ridge_scale .* identity_matrix
+            updated = _cp_factorized_mttkrp_cuda(
+                source_weights, source_factors, factors, mode) / gram
+            weights = _normalize_mmgnlse_cp_columns_cuda!(
+                updated, floor_norm)
+            factors[mode] = updated
+        end
+
+        if iteration == 1 || iteration % Int(check_every) == 0 ||
+           iteration == Int(maxiter)
+            err = _cp_factorized_relative_error_cuda(
+                source_weights, source_factors, source_norm_squared,
+                weights, factors; block_size=error_block_size)
+            synchronize && CUDA.synchronize()
+            push!(history, err)
+            verbose && @info "CUDA factorized CP-ALS" iteration rank=r relative_error=err
+            if err <= target_error
+                converged = true
+                break
+            end
+            if isfinite(previous_error) &&
+               abs(previous_error - err) <= tolerance * max(previous_error, 1.0)
+                converged = true
+                break
+            end
+            previous_error = err
+        end
+    end
+    return Array(weights), ntuple(mode -> Array(factors[mode]), 4),
+           history, iterations, converged
+end
+
+function PulsePropagation._cp_compress_factorized_cuda(
+    source::PulsePropagation.MMGNLSECPDecomposition;
+    target_error::Real,
+    max_rank::Integer,
+    min_rank::Integer,
+    rank_step::Integer,
+    seed::Integer,
+    initial=nothing,
+    maxiter::Integer,
+    tolerance::Real,
+    ridge::Real,
+    check_every::Integer,
+    restarts::Integer,
+    source_checksum=nothing,
+    device=nothing,
+    synchronize::Bool=true,
+    error_block_size::Integer=256,
+    verbose::Bool=false,
+)
+    CUDA.functional() || error(
+        "CUDA.jl is available but no functional CUDA device was found.")
+    device === nothing || CUDA.device!(device)
+    source_weights_cpu, source_factors_cpu =
+        PulsePropagation._cp_real_factorized_source(source)
+    source_weights = CUDA.CuArray(source_weights_cpu)
+    source_factors = [CUDA.CuArray(factor) for factor in source_factors_cpu]
+    source_tied = all(
+        factor -> factor == source_factors_cpu[1], source_factors_cpu[2:4])
+    source_norm_squared = if source_tied
+        correlation = transpose(source_factors[1]) * source_factors[1]
+        correlation .^= 4
+        real(dot(source_weights, correlation * source_weights))
+    else
+        real(_cp_factorized_inner_product_cuda(
+            source_weights, source_factors, source_weights, source_factors;
+            block_size=error_block_size))
+    end
+    metadata = source.metadata
+    best = nothing
+    warm = initial
+
+    for rank in PulsePropagation._cp_factorized_rank_sequence(
+        Int(min_rank), Int(rank_step), Int(max_rank))
+        if rank == PulsePropagation.cp_rank(source)
+            return PulsePropagation.MMGNLSECPDecomposition(
+                source_weights_cpu, source_factors_cpu;
+                layout=metadata.layout, nmodes=metadata.nmodes,
+                npolarizations=metadata.npolarizations,
+                source_checksum, relative_error=0.0, seed,
+                iterations=0, converged=true, zero_tensor=false)
+        end
+        rank_best = nothing
+        for restart in 1:Int(restarts)
+            restart_initial = restart == 1 ? warm : nothing
+            local_seed = Int(seed) + 104729 * rank + 1009 * (restart - 1)
+            weights, factors, history, iterations, _ =
+                _cp_als_factorized_real_cuda(
+                    source_weights, source_factors, rank;
+                    seed=local_seed, initial=restart_initial, maxiter,
+                    tolerance, ridge, check_every, target_error,
+                    source_norm_squared, synchronize,
+                    error_block_size, verbose)
+            err = history[end]
+            candidate = PulsePropagation.MMGNLSECPDecomposition(
+                weights, factors;
+                layout=metadata.layout, nmodes=metadata.nmodes,
+                npolarizations=metadata.npolarizations,
+                source_checksum, relative_error=err, seed,
+                iterations, converged=err <= target_error,
+                zero_tensor=false)
+            if rank_best === nothing ||
+               candidate.relative_error < rank_best.relative_error
+                rank_best = candidate
+            end
+        end
+        warm = rank_best
+        if best === nothing || rank_best.relative_error < best.relative_error
+            best = rank_best
+        end
+        rank_best.relative_error <= target_error && return rank_best
+    end
+
+    throw(PulsePropagation.CPCompressionFailure(
+        Float64(target_error), Int(max_rank), best))
+end
+
+function _cp_als_complex_cuda(X::AbstractArray{<:Number,4}, rank::Integer;
+                              seed::Integer,
+                              initial=nothing,
+                              maxiter::Integer=300,
+                              tolerance::Real=1e-10,
+                              ridge::Real=1e-12,
+                              check_every::Integer=5,
+                              target_error::Real=0.0,
+                              device=nothing,
+                              synchronize::Bool=true,
+                              rank_block_size=nothing,
+                              max_workspace_bytes=nothing,
+                              workspace_memory_fraction::Real=0.5,
+                              reclaim_memory::Bool=true,
+                              symmetric_source::Bool=false,
+                              verbose::Bool=false)
+    CUDA.functional() || Base.error(
+        "CUDA.jl is available but no functional CUDA device was found.")
+    device === nothing || CUDA.device!(device)
+    r = Int(rank)
+    r > 0 || throw(ArgumentError("rank must be positive."))
+    maxiter > 0 || throw(ArgumentError("maxiter must be positive."))
+    check_every > 0 || throw(ArgumentError("check_every must be positive."))
+    _check_cuda_unfolding_addressability(X, symmetric_source)
+
+    RT = typeof(float(real(zero(eltype(X)))))
+    CT = Complex{RT}
+    source = _cuda_complex_source(X, CT)
+    # Avoid cuBLAS nrm2's 32-bit vector-length ceiling for large N^4 tensors.
+    source_norm = sqrt(sum(abs2, source))
+    source_norm > zero(RT) ||
+        throw(ArgumentError("Use cp_compress for a zero tensor."))
+
+    rng = Random.MersenneTwister(Int(seed))
+    factors_cpu = PulsePropagation._complex_random_factors(
+        rng, CT, size(X), r; initial)
+    factors = [CUDA.CuArray(factor) for factor in factors_cpu]
+    weights = CUDA.ones(RT, r)
+    resolved_block, workspace_budget, bytes_per_column =
+        _cuda_cp_rank_block_size(
+            size(X, 1), r, CT;
+            rank_block_size,
+            max_workspace_bytes,
+            workspace_memory_fraction,
+            reclaim_memory,
+            reserve_unfolding=!symmetric_source)
+    if verbose
+        @info "CUDA complex CP workspace" rank=r rank_block_size=resolved_block workspace_budget_bytes=workspace_budget bytes_per_rank_column=bytes_per_column symmetric_source
+    end
+    history = Float64[]
+    previous_error = Inf
+    converged = false
+    iterations = 0
+    floor_norm = sqrt(eps(RT))
+    unfolding_workspace = symmetric_source ? nothing :
+                          similar(source, length(source))
+
+    for iteration in 1:Int(maxiter)
+        iterations = iteration
+        for mode in 1:4
+            rest = [index for index in 1:4 if index != mode]
+            gram = CUDA.ones(CT, r, r)
+            for index in rest
+                gram .*= transpose(factors[index]) * conj.(factors[index])
+            end
+            ridge_scale = max(maximum(abs, gram), one(RT))
+            gram .+= CUDA.CuArray(
+                RT(ridge) * ridge_scale .* Matrix{CT}(I, r, r))
+            unfolded = symmetric_source || mode == 1 ?
+                         reshape(source, size(source, 1), :) :
+                         _mode_unfold_cuda!(
+                             unfolding_workspace, source, mode)
+            mttkrp = _cp_mttkrp_cuda(
+                unfolded, factors, rest, resolved_block;
+                conjugate_factors=true)
+            updated = mttkrp / gram
+            weights = _normalize_mmgnlse_cp_columns_cuda!(
+                updated, floor_norm)
+            factors[mode] = updated
+        end
+
+        if iteration == 1 ||
+           iteration % Int(check_every) == 0 ||
+           iteration == Int(maxiter)
+            err = _cp_relative_error_cuda(
+                source, source_norm^2, weights, factors,
+                resolved_block; symmetric_source)
+            synchronize && CUDA.synchronize()
+            push!(history, err)
+            if err <= target_error
+                converged = true
+                break
+            end
+            if isfinite(previous_error) &&
+               abs(previous_error - err) <=
+               tolerance * max(previous_error, 1.0)
+                converged = true
+                break
+            end
+            previous_error = err
+        end
+    end
+
+    return Array(weights),
+           ntuple(index -> Array(factors[index]), 4),
+           history,
+           iterations,
+           converged
+end
+
+function PulsePropagation._cp_compress_cuda(
+    S::AbstractArray{<:Number,4};
+    target_error::Real=1e-6,
+    error=nothing,
+    max_rank::Integer=1024,
+    min_rank::Integer=1,
+    rank_step::Integer=1,
+    seed::Integer=0x4d4d474e,
+    maxiter::Integer=300,
+    tolerance::Real=1e-10,
+    ridge::Real=1e-12,
+    check_every::Integer=5,
+    restarts::Integer=1,
+    layout::Symbol=:spatial,
+    nmodes::Union{Nothing,Integer}=nothing,
+    npolarizations::Integer=1,
+    source_checksum=nothing,
+    checksum_fn=nothing,
+    fftw_threads::Integer=1,
+    blas_threads::Integer=1,
+    device=nothing,
+    synchronize::Bool=true,
+    rank_block_size=nothing,
+    max_workspace_bytes=nothing,
+    workspace_memory_fraction::Real=0.5,
+    reclaim_memory::Bool=true,
+    symmetric_source::Bool=false,
+    check_symmetry::Bool=true,
+)
+    resolved_error = error === nothing ? target_error : float(error)
+    resolved_error >= 0 ||
+        throw(ArgumentError("error must be nonnegative."))
+    max_rank > 0 || throw(ArgumentError("max_rank must be positive."))
+    min_rank > 0 || throw(ArgumentError("min_rank must be positive."))
+    min_rank <= max_rank ||
+        throw(ArgumentError("min_rank cannot exceed max_rank."))
+    rank_step > 0 || throw(ArgumentError("rank_step must be positive."))
+    restarts > 0 || throw(ArgumentError("restarts must be positive."))
+    fftw_threads > 0 ||
+        throw(ArgumentError("fftw_threads must be positive."))
+    blas_threads > 0 ||
+        throw(ArgumentError("blas_threads must be positive."))
+    PulsePropagation._cp_validate_memory_controls(
+        rank_block_size, max_workspace_bytes, workspace_memory_fraction)
+    _check_cuda_unfolding_addressability(S, symmetric_source)
+    all(isfinite, S) ||
+        throw(ArgumentError("The overlap tensor contains non-finite values."))
+    CUDA.functional() || Base.error(
+        "CUDA.jl is available but no functional CUDA device was found.")
+    device === nothing || CUDA.device!(device)
+    RT = typeof(float(real(zero(eltype(S)))))
+    CT = Complex{RT}
+    if symmetric_source && check_symmetry
+        symmetry_defect = PulsePropagation._cp_symmetric_tensor_defect(S)
+        symmetry_defect <= max(1e-12, 100eps(RT)) || throw(ArgumentError(
+            "symmetric_source=true requires a fully permutation-symmetric " *
+            "tensor; measured relative defect $symmetry_defect."))
+    end
+    checksum = PulsePropagation._resolved_checksum(
+        S; source_checksum, checksum_fn)
+    metadata = PulsePropagation._cp_source_metadata(
+        size(S); layout, nmodes, npolarizations,
+        source_checksum=checksum)
+    # cuBLAS nrm2 uses a 32-bit vector length. The reduction remains valid
+    # for the large symmetric sources admitted by the bounded path.
+    source_norm = sqrt(sum(abs2, S))
+    if source_norm == 0
+        factors = ntuple(index -> zeros(CT, size(S, index), 0), 4)
+        return PulsePropagation.MMGNLSECPDecomposition(
+            Float64[], factors;
+            layout=metadata.layout,
+            nmodes=metadata.nmodes,
+            npolarizations=metadata.npolarizations,
+            source_checksum=checksum,
+            relative_error=0.0,
+            seed,
+            iterations=0,
+            converged=true,
+            zero_tensor=true)
+    end
+
+    source_device = _cuda_complex_source(S, CT)
+
+    best = nothing
+    warm = nothing
+    for rank in Int(min_rank):Int(rank_step):Int(max_rank)
+        rank_best = nothing
+        for restart in 1:Int(restarts)
+            initial = restart == 1 ? warm : nothing
+            local_seed =
+                Int(seed) + 104729 * rank + 1009 * (restart - 1)
+            weights, factors, history, iterations, als_converged =
+                _cp_als_complex_cuda(
+                    source_device, rank;
+                    seed=local_seed,
+                    initial,
+                    maxiter,
+                    tolerance,
+                    ridge,
+                    check_every,
+                    target_error=resolved_error,
+                    device,
+                    synchronize,
+                    rank_block_size,
+                    max_workspace_bytes,
+                    workspace_memory_fraction,
+                    reclaim_memory,
+                    symmetric_source)
+            err = isempty(history) ?
+                  PulsePropagation._cp_relative_error(
+                      CT.(S), weights, factors) :
+                  history[end]
+            candidate = PulsePropagation.MMGNLSECPDecomposition(
+                weights, factors;
+                layout=metadata.layout,
+                nmodes=metadata.nmodes,
+                npolarizations=metadata.npolarizations,
+                source_checksum=checksum,
+                relative_error=err,
+                seed,
+                iterations,
+                converged=err <= resolved_error,
+                zero_tensor=false)
+            if rank_best === nothing ||
+               candidate.relative_error < rank_best.relative_error
+                rank_best = candidate
+            end
+        end
+        warm = rank_best
+        if best === nothing ||
+           rank_best.relative_error < best.relative_error
+            best = rank_best
+        end
+        rank_best.relative_error <= resolved_error && return rank_best
+    end
+
+    throw(PulsePropagation.CPCompressionFailure(
+        Float64(resolved_error), Int(max_rank), best))
+end
+
+function PulsePropagation._cp_compress_symmetric_experimental_cuda(
+    source::AbstractArray{RT,4}, rank::Integer;
+    initial=nothing,
+    maxiter::Integer,
+    check_every::Integer,
+    learning_rate::Real,
+    ridge::Real,
+    tolerance::Real,
+    target_error,
+    initial_maxiter::Integer,
+    initial_tolerance::Real,
+    seed::Integer,
+    metadata,
+    checksum,
+    verbose::Bool,
+    device=nothing,
+    synchronize::Bool=true,
+    rank_block_size=nothing,
+    max_workspace_bytes=nothing,
+    workspace_memory_fraction::Real=0.5,
+    reclaim_memory::Bool=true,
+) where {RT<:AbstractFloat}
+    CUDA.functional() || error(
+        "CUDA.jl is available but no functional CUDA device was found.")
+    device === nothing || CUDA.device!(device)
+    r = Int(rank)
+    rng = Random.MersenneTwister(Int(seed))
+    source_device = source isa CUDA.CuArray{RT,4} ? source :
+                    CUDA.CuArray(source)
+    warm = initial
+    if warm === nothing
+        warm, _ = PulsePropagation.cp_als_warm_cuda(
+            source_device, r;
+            maxiter=Int(initial_maxiter),
+            tol=initial_tolerance,
+            ridge=RT(ridge),
+            check_every=Int(check_every),
+            rng,
+            verbose,
+            device,
+            synchronize,
+            rank_block_size,
+            max_workspace_bytes,
+            workspace_memory_fraction,
+            reclaim_memory,
+            symmetric_source=true,
+        )
+    end
+    factor_cpu = PulsePropagation._cp_symmetric_initial_factor(
+        warm, size(source, 1), r, rng, RT)
+    factor = CUDA.CuArray(factor_cpu)
+    identity = CUDA.CuArray(Matrix{RT}(I, r, r))
+    resolved_block, workspace_budget, bytes_per_column =
+        _cuda_cp_rank_block_size(
+            size(source, 1), r, RT;
+            rank_block_size,
+            max_workspace_bytes,
+            workspace_memory_fraction,
+            reclaim_memory)
+    if verbose
+        @info "CUDA symmetric CP workspace" rank=r rank_block_size=resolved_block workspace_budget_bytes=workspace_budget bytes_per_rank_column=bytes_per_column
+    end
+    synchronize && CUDA.synchronize()
+    weights, best_factor, relative_error, iterations, converged =
+        PulsePropagation._cp_symmetric_optimize(
+            source_device, factor, identity;
+            maxiter=Int(maxiter),
+            check_every=Int(check_every),
+            learning_rate,
+            ridge,
+            tolerance,
+            target_error,
+            rank_block_size=resolved_block,
+            verbose,
+            synchronize_fn=synchronize ? CUDA.synchronize : () -> nothing,
+        )
+    synchronize && CUDA.synchronize()
+    return PulsePropagation._cp_symmetric_result(
+        weights, best_factor, relative_error, iterations, converged,
+        metadata, checksum, seed)
 end
 
 function _assert_cuda_array(x, name)
@@ -1101,5 +1933,6 @@ function PulsePropagation.solve_adjoint_compressed_rankchannels_cuda(
 end
 
 include("mmgnlse_cuda.jl")
+include("full_field_cuda.jl")
 
 end

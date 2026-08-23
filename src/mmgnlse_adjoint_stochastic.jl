@@ -117,6 +117,138 @@ function _mmgnlse_interpolate_interaction_field(fields::AbstractArray{<:Complex,
            weight .* @view(fields[:, :, :, right])
 end
 
+mutable struct MMGNLSEScalarCPAdjointWorkspace{C,A3,A2,A1,P3F,P3I}
+    cp::C
+    interpolated::A3
+    propagator::A3
+    field_t::A3
+    lambda_t::A3
+    cubic_cotangent::A3
+    vjp_t::A3
+    spectral_scratch::A3
+    rank_cotangent::A2
+    cwu1::A2
+    raman_combined::A1
+    raman_combined_conj::A1
+    fft_field!::P3F
+    fft_lambda!::P3F
+    fft_cubic!::P3F
+    ifft_cubic!::P3I
+    ifft_vjp!::P3I
+end
+
+function _mmgnlse_scalar_cp_adjoint_workspace(
+    prototype::Array{ComplexF64,3},
+    cp::MMGNLSECPDecomposition,
+    raman,
+)
+    nt, nm, _ = size(prototype)
+    forward_workspace = _mmgnlse_scalar_cp_workspace(cp, nt, nm)
+    arrays = ntuple(_ -> similar(prototype), 7)
+    interpolated, propagator, field_t, lambda_t,
+        cubic_cotangent, vjp_t, spectral_scratch = arrays
+    rank_cotangent = zeros(ComplexF64, nt, cp_rank(cp))
+    weighted_u1 = ComplexF64.(cp.U[1]) .*
+                  reshape(ComplexF64.(cp.λ), 1, :)
+    cwu1 = conj.(weighted_u1)
+    raman_combined = ComplexF64.(raman.ha .+ raman.hb)
+    raman_combined_conj = conj.(raman_combined)
+    return MMGNLSEScalarCPAdjointWorkspace(
+        forward_workspace.cp, interpolated, propagator, field_t,
+        lambda_t, cubic_cotangent, vjp_t, spectral_scratch,
+        rank_cotangent, cwu1, raman_combined, raman_combined_conj,
+        plan_fft!(field_t, 1; flags=FFTW.MEASURE),
+        plan_fft!(lambda_t, 1; flags=FFTW.MEASURE),
+        plan_fft!(cubic_cotangent, 1; flags=FFTW.MEASURE),
+        plan_ifft!(cubic_cotangent, 1; flags=FFTW.MEASURE),
+        plan_ifft!(spectral_scratch, 1; flags=FFTW.MEASURE))
+end
+
+function _mmgnlse_interpolate_interaction_field!(
+    out, fields, zgrid, z,
+)
+    z <= first(zgrid) && (out .= @view(fields[:, :, :, 1]); return out)
+    z >= last(zgrid) && (out .= @view(fields[:, :, :, end]); return out)
+    right = searchsortedfirst(zgrid, z)
+    if zgrid[right] == z
+        out .= @view fields[:, :, :, right]
+        return out
+    end
+    left = right - 1
+    weight = (z - zgrid[left]) / (zgrid[right] - zgrid[left])
+    out .= (1 - weight) .* @view(fields[:, :, :, left]) .+
+           weight .* @view(fields[:, :, :, right])
+    return out
+end
+
+function _mmgnlse_scalar_cp_backproject!(
+    out, rank_values, factor, cache,
+)
+    mul!(cache.k, rank_values, adjoint(factor))
+    out .+= cache.k
+    return out
+end
+
+function _mmgnlse_scalar_cp_vjp_nonlinear!(
+    out,
+    field_t,
+    cotangent_t,
+    solver_cache,
+    workspace::MMGNLSEScalarCPAdjointWorkspace,
+)
+    fill!(out, zero(eltype(out)))
+    !solver_cache.nonlinear_active && return out
+    workspace.cubic_cotangent .= cotangent_t
+    workspace.ifft_cubic! * workspace.cubic_cotangent
+    workspace.cubic_cotangent .*= conj.(solver_cache.nonlinear_prefactor)
+    workspace.fft_cubic! * workspace.cubic_cotangent
+
+    cache = workspace.cp
+    nt, nm, _ = size(field_t)
+    field = reshape(field_t, nt, nm)
+    cotangent = reshape(workspace.cubic_cotangent, nt, nm)
+    mul!(cache.b2, field, cache.u2)
+    mul!(cache.b3, field, cache.u3)
+    cache.conj_at .= conj.(field)
+    mul!(cache.b4, cache.conj_at, cache.u4)
+    mul!(workspace.rank_cotangent, cotangent, workspace.cwu1)
+    result = reshape(out, nt, nm)
+    fraction = solver_cache.raman.fraction
+
+    if fraction != 1
+        cache.p .= (1 - fraction) .* workspace.rank_cotangent .*
+                   conj.(cache.b3 .* cache.b4)
+        _mmgnlse_scalar_cp_backproject!(result, cache.p, cache.u2, cache)
+        cache.p .= (1 - fraction) .* workspace.rank_cotangent .*
+                   conj.(cache.b2 .* cache.b4)
+        _mmgnlse_scalar_cp_backproject!(result, cache.p, cache.u3, cache)
+        cache.p .= (1 - fraction) .* workspace.rank_cotangent .*
+                   conj.(cache.b2 .* cache.b3)
+        mul!(cache.k, cache.p, adjoint(cache.u4))
+        result .+= conj.(cache.k)
+    end
+
+    if !iszero(fraction)
+        cache.conv .= cache.b3 .* cache.b4
+        cache.ifft_rank! * cache.conv
+        _rank_filter_time!(cache.conv, workspace.raman_combined)
+        cache.fft_rank! * cache.conv
+        cache.p .= fraction .* workspace.rank_cotangent .* conj.(cache.conv)
+        _mmgnlse_scalar_cp_backproject!(result, cache.p, cache.u2, cache)
+
+        cache.conv .= fraction .* workspace.rank_cotangent .* conj.(cache.b2)
+        cache.ifft_rank! * cache.conv
+        _rank_filter_time!(cache.conv, workspace.raman_combined_conj)
+        cache.fft_rank! * cache.conv
+        cache.p .= cache.conv .* conj.(cache.b4)
+        _mmgnlse_scalar_cp_backproject!(result, cache.p, cache.u3, cache)
+        cache.p .= cache.conv .* conj.(cache.b3)
+        mul!(cache.k, cache.p, adjoint(cache.u4))
+        result .+= conj.(cache.k)
+    end
+    return out
+end
+
 function _mmgnlse_validate_adjoint_terminal(lambda_terminal,
                                              parameters::MMGNLSEParameters)
     ndims(lambda_terminal) == 3 || throw(DimensionMismatch(
@@ -178,8 +310,11 @@ or supply `initial_field` together with `dz_forward`. Sparse forward solutions
 are deterministically replayed with `saveat=:steps` for interpolation. The
 returned trajectory is always ordered in ascending z. With `units=:photon`,
 saved gradients are `dJ/dconj(B) = dJ/dconj(A)/sqrt(weight)`; bins at
-nonpositive absolute frequency are zero. `backend=:cuda` requires CUDA.jl and
-returns the same host-array solution representation as the CPU backend.
+nonpositive absolute frequency are zero. CUDA variants return the same
+host-array solution representation as the CPU backend and use the same CP
+policy as `solve_mmgnlse`: `:cuda` is the baseline CP implementation,
+`:cuda_cp_optimized` enables rank-agnostic CP optimizations only, and
+`:cuda_optimized` additionally enables rank-tuned choices.
 """
 function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
                        parameters::MMGNLSEParameters,
@@ -193,12 +328,16 @@ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
                        backend=:cpu,
                        device=nothing,
                        synchronize::Bool=true)
-    selected_backend = _mmgnlse_validate_backend(backend)
-    if selected_backend === :cuda
+    selected_backend = _mmgnlse_validate_solver_backend(backend, parameters)
+    selected_backend === :cuda_cp_symmetric_experimental &&
+        throw(ArgumentError(
+            "backend=:cuda_cp_symmetric_experimental is forward-only and " *
+            "does not alter the CUDA adjoint pathways."))
+    if selected_backend in (:cuda, :cuda_cp_optimized, :cuda_optimized)
         return _mmgnlse_solve_adjoint_cuda(
             lambda_terminal, parameters, dz_adj;
             forward_solution, initial_field, dz_forward, method, units,
-            saveat, device, synchronize)
+            saveat, device, synchronize, backend=selected_backend)
     end
     (forward_solution === nothing) ⊻ (initial_field === nothing) ||
         throw(ArgumentError(
@@ -248,6 +387,12 @@ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
     # For dλ/dz = -L†λ - N′†λ, the homogeneous adjoint propagator from
     # zero to z is inv(conj(P(0,z))). Thus λ̃ = conj(P(0,z)) .* λ.
     lambda_interaction = conj.(terminal_propagator) .* lambda_raw
+    cp_workspace = _mmgnlse_use_scalar_cp_fast_path(
+        parameters, forward.initial_field) ?
+        _mmgnlse_scalar_cp_adjoint_workspace(
+            similar(lambda_interaction), parameters.S,
+            adjoint_core_cache.raman) :
+        nothing
 
     function rhs!(dlambda, lambda_tilde, _, z)
         if !adjoint_core_cache.nonlinear_active
@@ -255,16 +400,38 @@ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
             return nothing
         end
         coordinate = T(z)
-        forward_tilde = _mmgnlse_interpolate_interaction_field(
-            forward_interaction, forward.z, coordinate)
-        forward_propagator = _mmgnlse_linear_propagator(
-            parameters, zero(T), coordinate, adjoint_core_cache)
-        field_t = fft(forward_propagator .* forward_tilde, 1)
-        lambda_raw_z = lambda_tilde ./ conj.(forward_propagator)
-        lambda_t = fft(lambda_raw_z, 1)
-        nonlinear_vjp_t = _mmgnlse_vjp_nonlinear(
-            field_t, lambda_t, parameters, adjoint_core_cache)
-        dlambda .= -conj.(forward_propagator) .* ifft(nonlinear_vjp_t, 1)
+        if cp_workspace === nothing
+            forward_tilde = _mmgnlse_interpolate_interaction_field(
+                forward_interaction, forward.z, coordinate)
+            forward_propagator = _mmgnlse_linear_propagator(
+                parameters, zero(T), coordinate, adjoint_core_cache)
+            field_t = fft(forward_propagator .* forward_tilde, 1)
+            lambda_raw_z = lambda_tilde ./ conj.(forward_propagator)
+            lambda_t = fft(lambda_raw_z, 1)
+            nonlinear_vjp_t = _mmgnlse_vjp_nonlinear(
+                field_t, lambda_t, parameters, adjoint_core_cache)
+            dlambda .=
+                -conj.(forward_propagator) .* ifft(nonlinear_vjp_t, 1)
+        else
+            _mmgnlse_interpolate_interaction_field!(
+                cp_workspace.interpolated, forward_interaction,
+                forward.z, coordinate)
+            cp_workspace.propagator .= exp.(
+                adjoint_core_cache.beta_operator .* coordinate)
+            cp_workspace.field_t .=
+                cp_workspace.propagator .* cp_workspace.interpolated
+            cp_workspace.fft_field! * cp_workspace.field_t
+            cp_workspace.lambda_t .=
+                lambda_tilde ./ conj.(cp_workspace.propagator)
+            cp_workspace.fft_lambda! * cp_workspace.lambda_t
+            _mmgnlse_scalar_cp_vjp_nonlinear!(
+                cp_workspace.vjp_t, cp_workspace.field_t,
+                cp_workspace.lambda_t, adjoint_core_cache, cp_workspace)
+            cp_workspace.spectral_scratch .= cp_workspace.vjp_t
+            cp_workspace.ifft_vjp! * cp_workspace.spectral_scratch
+            dlambda .= -conj.(cp_workspace.propagator) .*
+                       cp_workspace.spectral_scratch
+        end
         return nothing
     end
 

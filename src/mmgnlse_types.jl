@@ -39,18 +39,78 @@ Base.show(io::IO, dofs::DegreesOfFreedom) =
 has_dof(dofs::DegreesOfFreedom, name::Symbol) = name in dofs
 
 """
-    MMGNLSEDomain(dofs; time_grid=nothing)
+    TransverseGrid(x, y)
+    TransverseGrid(; Nx, Ny=Nx, dx, dy=dx)
+
+Uniform Cartesian transverse discretization in metres. Public full-field arrays
+use the axis order `(x, y)`. The coordinate vectors must be finite, strictly
+increasing, and uniformly sampled.
+"""
+struct TransverseGrid{T<:Real}
+    x::Vector{T}
+    y::Vector{T}
+    dx::T
+    dy::T
+end
+
+function _mmgnlse_uniform_spacing(values::AbstractVector{<:Real}, name)
+    length(values) >= 2 || throw(ArgumentError(
+        "$name must contain at least two samples."))
+    all(isfinite, values) || throw(ArgumentError(
+        "$name samples must be finite."))
+    differences = diff(values)
+    all(>(zero(eltype(differences))), differences) || throw(ArgumentError(
+        "$name samples must be strictly increasing."))
+    spacing = first(differences)
+    tolerance = 64eps(typeof(float(spacing))) *
+                max(one(float(spacing)), maximum(abs, values))
+    all(value -> isapprox(value, spacing;
+                          rtol=64eps(typeof(float(spacing))),
+                          atol=tolerance), differences) || throw(ArgumentError(
+        "$name must be uniformly sampled."))
+    return spacing
+end
+
+function TransverseGrid(x::AbstractVector{<:Real},
+                        y::AbstractVector{<:Real})
+    T = promote_type(float(eltype(x)), float(eltype(y)))
+    x_values = T.(x)
+    y_values = T.(y)
+    dx = T(_mmgnlse_uniform_spacing(x_values, :x))
+    dy = T(_mmgnlse_uniform_spacing(y_values, :y))
+    return TransverseGrid{T}(x_values, y_values, dx, dy)
+end
+
+function TransverseGrid(; Nx::Integer, Ny::Integer=Nx, dx, dy=dx)
+    Nx >= 2 || throw(ArgumentError("Nx must be at least two."))
+    Ny >= 2 || throw(ArgumentError("Ny must be at least two."))
+    dx_value = float(dx)
+    dy_value = float(dy)
+    isfinite(dx_value) && dx_value > 0 || throw(ArgumentError(
+        "dx must be finite and positive."))
+    isfinite(dy_value) && dy_value > 0 || throw(ArgumentError(
+        "dy must be finite and positive."))
+    return TransverseGrid(centered_time_grid(Int(Nx), dx_value),
+                          centered_time_grid(Int(Ny), dy_value))
+end
+
+"""
+    MMGNLSEDomain(dofs, time_grid; transverse_grid=nothing)
+    MMGNLSEDomain(dofs; time_grid=nothing, transverse_grid=nothing)
 
 Discretization metadata associated with an MMGNLSE problem. A `TimeGrid` is
 required exactly when `:time` is active. If time is suppressed, the public time
-axis is a retained singleton.
+axis is a retained singleton. A `TransverseGrid` may be attached when `:space`
+is active; modal parameters do not require one, while full-field parameters do.
 """
-struct MMGNLSEDomain{G}
+struct MMGNLSEDomain{G,S}
     dofs::DegreesOfFreedom
     time_grid::G
+    transverse_grid::S
 end
 
-function MMGNLSEDomain(dofs::DegreesOfFreedom; time_grid=nothing)
+function MMGNLSEDomain(dofs::DegreesOfFreedom, time_grid;
+                       transverse_grid=nothing)
     if has_dof(dofs, :time)
         time_grid isa TimeGrid || throw(ArgumentError(
             "MMGNLSEDomain requires a TimeGrid when :time is active."))
@@ -58,11 +118,23 @@ function MMGNLSEDomain(dofs::DegreesOfFreedom; time_grid=nothing)
         throw(ArgumentError(
             "MMGNLSEDomain does not accept a TimeGrid when :time is inactive."))
     end
-    return MMGNLSEDomain{typeof(time_grid)}(dofs, time_grid)
+    transverse_grid === nothing || transverse_grid isa TransverseGrid ||
+        throw(ArgumentError(
+            "transverse_grid must be a TransverseGrid or nothing."))
+    !has_dof(dofs, :space) && transverse_grid !== nothing &&
+        throw(ArgumentError(
+            "MMGNLSEDomain accepts a transverse grid only when :space is active."))
+    return MMGNLSEDomain{typeof(time_grid),typeof(transverse_grid)}(
+        dofs, time_grid, transverse_grid)
 end
 
-MMGNLSEDomain(names::Symbol...; time_grid=nothing) =
-    MMGNLSEDomain(degrees_of_freedom(names...); time_grid=time_grid)
+MMGNLSEDomain(dofs::DegreesOfFreedom; time_grid=nothing,
+              transverse_grid=nothing) =
+    MMGNLSEDomain(dofs, time_grid; transverse_grid)
+
+MMGNLSEDomain(names::Symbol...; time_grid=nothing,
+              transverse_grid=nothing) =
+    MMGNLSEDomain(degrees_of_freedom(names...), time_grid; transverse_grid)
 
 frequency_count(domain::MMGNLSEDomain) =
     has_dof(domain.dofs, :time) ? domain.time_grid.nt : 1
@@ -134,14 +206,17 @@ the isotropic-material model.
 struct SpatialOverlap{T<:Number} <: AbstractOverlap
     values::Array{T,4}
 
-    function SpatialOverlap(values::AbstractArray{T,4}) where {T<:Number}
+    function SpatialOverlap(values::AbstractArray{T,4};
+                            copy_values::Bool=true) where {T<:Number}
         nmode = size(values, 1)
         nmode > 0 || throw(ArgumentError("SpatialOverlap cannot be empty."))
         size(values) == (nmode, nmode, nmode, nmode) || throw(DimensionMismatch(
             "SpatialOverlap must have shape (Nm, Nm, Nm, Nm); got $(size(values))."))
         all(_mmgnlse_isfinite, values) || throw(ArgumentError(
             "SpatialOverlap entries must be finite."))
-        return new{T}(Array(values))
+        stored = copy_values || !(values isa Array{T,4}) ?
+                 Array(values) : values
+        return new{T}(stored)
     end
 end
 
@@ -158,7 +233,8 @@ polarization coefficient is applied to this tensor.
 struct ComponentOverlap{T<:Number} <: AbstractOverlap
     values::Array{T,8}
 
-    function ComponentOverlap(values::AbstractArray{T,8}) where {T<:Number}
+    function ComponentOverlap(values::AbstractArray{T,8};
+                              copy_values::Bool=true) where {T<:Number}
         nmode = size(values, 1)
         expected = (nmode, 2, nmode, 2, nmode, 2, nmode, 2)
         nmode > 0 || throw(ArgumentError("ComponentOverlap cannot be empty."))
@@ -166,7 +242,9 @@ struct ComponentOverlap{T<:Number} <: AbstractOverlap
             "ComponentOverlap must have shape $expected; got $(size(values))."))
         all(_mmgnlse_isfinite, values) || throw(ArgumentError(
             "ComponentOverlap entries must be finite."))
-        return new{T}(Array(values))
+        stored = copy_values || !(values isa Array{T,8}) ?
+                 Array(values) : values
+        return new{T}(stored)
     end
 end
 
@@ -432,7 +510,11 @@ end
 
 Canonical physical parameters for the new facade. `S` is the spatial overlap
 in `m^-2` (or an explicitly component-resolved overlap); `n2` and `omega0` are
-separate and are never folded into `S`.
+separate and are never folded into `S`. Raw 4D/8D arrays are defensively
+copied by default. Set `copy_overlap=false` to transfer ownership of a large
+ordinary `Array` without duplicating it; callers must then not mutate that
+array while the parameters are in use. Existing `AbstractOverlap` and CP
+objects are always retained without copying.
 """
 struct MMGNLSEParameters{D,T,A,G,B,O,N,W,R}
     domain::D
@@ -454,7 +536,8 @@ function MMGNLSEParameters(domain::MMGNLSEDomain;
                            S,
                            n2,
                            omega0,
-                           raman=NoRaman())
+                           raman=NoRaman(),
+                           copy_overlap::Bool=true)
     length_value = float(length)
     n2_value = float(n2)
     omega0_value = float(omega0)
@@ -466,7 +549,7 @@ function MMGNLSEParameters(domain::MMGNLSEDomain;
         "MMGNLSEParameters omega0 must be finite and positive (rad/ps)."))
 
     beta_value = _coerce_beta(beta)
-    overlap = _coerce_overlap(S)
+    overlap = _coerce_overlap(S; copy_values=copy_overlap)
     raman isa AbstractRamanResponse || throw(ArgumentError(
         "raman must be NoRaman(), AgarwalRaman(...), or AnisotropicRaman(...)."))
 
@@ -517,6 +600,12 @@ function _coerce_overlap(overlap)
     throw(ArgumentError(
         "S must be a scalar, SpatialOverlap, ComponentOverlap, or a 4D/8D numeric array."))
 end
+
+_coerce_overlap(overlap; copy_values::Bool=true) = _coerce_overlap(overlap)
+_coerce_overlap(overlap::AbstractArray{<:Number,4}; copy_values::Bool=true) =
+    SpatialOverlap(overlap; copy_values)
+_coerce_overlap(overlap::AbstractArray{<:Number,8}; copy_values::Bool=true) =
+    ComponentOverlap(overlap; copy_values)
 
 _beta_values(beta::TaylorBeta) = beta.coefficients
 _beta_values(beta::SampledBeta) = beta.values

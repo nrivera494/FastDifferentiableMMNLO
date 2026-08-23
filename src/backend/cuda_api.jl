@@ -38,6 +38,33 @@ function cp_als_warm_cuda(args...; kwargs...)
     _cuda_unavailable_error("cp_als_warm_cuda")
 end
 
+function _cp_compress_cuda(args...; kwargs...)
+    _cuda_unavailable_error("cp_compress(...; backend=:cuda)")
+end
+
+function _cp_compress_factorized_cuda(args...; kwargs...)
+    _cuda_unavailable_error(
+        "cp_compress(::MMGNLSECPDecomposition; backend=:cuda)")
+end
+
+function _cp_relative_error_factorized_cuda(args...; kwargs...)
+    _cuda_unavailable_error(
+        "cp_relative_error(...; backend=:cuda)")
+end
+
+function _cp_cuda_memory_status(args...; kwargs...)
+    _cuda_unavailable_error("cp_compression_plan(...; backend=:cuda)")
+end
+
+function _cp_prepare_bounded_cuda_source(args...; kwargs...)
+    _cuda_unavailable_error("cp_compress_bounded(...; backend=:cuda)")
+end
+
+function _cp_compress_symmetric_experimental_cuda(args...; kwargs...)
+    _cuda_unavailable_error(
+        "cp_compress_symmetric_experimental(...; backend=:cuda)")
+end
+
 function solve_adjoint_cuda(args...; kwargs...)
     _cuda_unavailable_error("solve_adjoint_cuda")
 end
@@ -49,10 +76,12 @@ end
 # New public MMGNLSE facade hooks.  The CUDA extension adds methods with the
 # same signatures; keeping the fallbacks in the core package lets callers use
 # `backend=:cuda` without making CUDA.jl a required dependency.
-function _mmgnlse_solve_cuda(args...; kwargs...)
-    _cuda_unavailable_error("solve_mmgnlse(...; backend=:cuda)")
+function _mmgnlse_solve_cuda(args...; backend=:cuda, kwargs...)
+    _cuda_unavailable_error(
+        "solve_mmgnlse(...; backend=$(repr(backend)))")
 end
 
-function _mmgnlse_solve_adjoint_cuda(args...; kwargs...)
-    _cuda_unavailable_error("solve_adjoint(...; backend=:cuda)")
+function _mmgnlse_solve_adjoint_cuda(args...; backend=:cuda, kwargs...)
+    _cuda_unavailable_error(
+        "solve_adjoint(...; backend=$(repr(backend)))")
 end

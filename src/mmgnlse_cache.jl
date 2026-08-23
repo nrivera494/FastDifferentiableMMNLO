@@ -312,11 +312,15 @@ function _require_sha256(checksum, description::AbstractString)
     return String(checksum)
 end
 
+_fiber_overlap_logical_value(overlap::SpatialOverlap) = overlap.values
+_fiber_overlap_logical_value(overlap::MMGNLSECPDecomposition) =
+    (kind=:MMGNLSECPDecomposition, value=_cp_logical_value(overlap))
+
 function _fiber_logical_value(properties::FiberProperties)
     modes = properties.modes
     return (
         beta_coefficients=properties.beta.coefficients,
-        S=properties.S.values,
+        S=_fiber_overlap_logical_value(properties.S),
         raman=properties.raman,
         mode_x=modes.x,
         mode_y=modes.y,
@@ -336,14 +340,21 @@ fiber_properties_checksum(properties::FiberProperties) =
 
 function _fiber_array_checksums(properties::FiberProperties)
     modes = properties.modes
-    return Dict{String,Any}(
+    checksums = Dict{String,Any}(
         "beta" => canonical_array_checksum(properties.beta.coefficients),
-        "S" => canonical_array_checksum(properties.S.values),
         "mode_x" => canonical_array_checksum(modes.x),
         "mode_y" => canonical_array_checksum(modes.y),
         "mode_fields" => canonical_array_checksum(modes.fields),
         "mode_beta0" => canonical_array_checksum(modes.beta0),
     )
+    if properties.S isa SpatialOverlap
+        checksums["S"] = canonical_array_checksum(properties.S.values)
+    else
+        for (name, checksum) in _cp_array_checksums(properties.S)
+            checksums["S_$name"] = checksum
+        end
+    end
+    return checksums
 end
 
 """
@@ -375,26 +386,46 @@ function save_fiber_properties(data_path::AbstractString,
     )
     writer = function (path)
         modes = properties.modes
-        JLD2.jldsave(path;
-            beta_coefficients=properties.beta.coefficients,
-            S_values=properties.S.values,
-            raman=properties.raman,
-            mode_x=modes.x,
-            mode_y=modes.y,
-            mode_fields=modes.fields,
-            mode_beta0=modes.beta0,
-            mode_labels=modes.labels,
-            mode_wavelength=modes.wavelength,
-            config=properties.config,
-            n2=properties.n2,
-            omega0=properties.omega0)
+        JLD2.jldopen(path, "w") do file
+            file["beta_coefficients"] = properties.beta.coefficients
+            file["raman"] = properties.raman
+            file["mode_x"] = modes.x
+            file["mode_y"] = modes.y
+            file["mode_fields"] = modes.fields
+            file["mode_beta0"] = modes.beta0
+            file["mode_labels"] = modes.labels
+            file["mode_wavelength"] = modes.wavelength
+            file["config"] = properties.config
+            file["n2"] = properties.n2
+            file["omega0"] = properties.omega0
+            if properties.S isa SpatialOverlap
+                file["S_kind"] = "SpatialOverlap"
+                file["S_values"] = properties.S.values
+            else
+                cp = properties.S
+                file["S_kind"] = "MMGNLSECPDecomposition"
+                file["S_weights"] = cp.λ
+                for index in 1:4
+                    file["S_factor_$index"] = cp.U[index]
+                end
+                file["S_layout"] = String(cp.metadata.layout)
+                file["S_nmodes"] = cp.metadata.nmodes
+                file["S_npolarizations"] = cp.metadata.npolarizations
+                file["S_source_checksum"] = cp.metadata.source_checksum
+                file["S_relative_error"] = cp.relative_error
+                file["S_seed"] = cp.seed
+                file["S_iterations"] = cp.iterations
+                file["S_converged"] = cp.converged
+                file["S_zero_tensor"] = cp.zero_tensor
+            end
+        end
     end
     return _write_cache_pair(data_path, metadata_path, metadata, writer; overwrite)
 end
 
 function _load_fiber_payload(data_path::AbstractString)
     data = JLD2.load(data_path)
-    required = ("beta_coefficients", "S_values", "raman", "mode_x", "mode_y",
+    required = ("beta_coefficients", "raman", "mode_x", "mode_y",
                 "mode_fields", "mode_beta0", "mode_labels", "mode_wavelength",
                 "config", "n2", "omega0")
     all(key -> haskey(data, key), required) || throw(ArgumentError(
@@ -402,8 +433,38 @@ function _load_fiber_payload(data_path::AbstractString)
     modes = FiberModeData(data["mode_x"], data["mode_y"], data["mode_fields"],
                           data["mode_beta0"], data["mode_labels"],
                           data["mode_wavelength"])
+    overlap_kind = get(data, "S_kind",
+                       haskey(data, "S_values") ? "SpatialOverlap" : "")
+    overlap = if overlap_kind == "SpatialOverlap"
+        haskey(data, "S_values") || throw(ArgumentError(
+            "FiberProperties dense-overlap payload is missing S_values."))
+        SpatialOverlap(data["S_values"])
+    elseif overlap_kind == "MMGNLSECPDecomposition"
+        cp_required = ("S_weights", "S_factor_1", "S_factor_2",
+                       "S_factor_3", "S_factor_4", "S_layout", "S_nmodes",
+                       "S_npolarizations", "S_source_checksum",
+                       "S_relative_error", "S_seed", "S_iterations",
+                       "S_converged", "S_zero_tensor")
+        all(key -> haskey(data, key), cp_required) || throw(ArgumentError(
+            "FiberProperties CP-overlap payload is incomplete."))
+        MMGNLSECPDecomposition(
+            data["S_weights"],
+            ntuple(index -> data["S_factor_$index"], 4);
+            layout=Symbol(data["S_layout"]),
+            nmodes=Int(data["S_nmodes"]),
+            npolarizations=Int(data["S_npolarizations"]),
+            source_checksum=data["S_source_checksum"],
+            relative_error=Float64(data["S_relative_error"]),
+            seed=Int(data["S_seed"]),
+            iterations=Int(data["S_iterations"]),
+            converged=Bool(data["S_converged"]),
+            zero_tensor=Bool(data["S_zero_tensor"]))
+    else
+        throw(ArgumentError(
+            "Unsupported FiberProperties overlap kind $overlap_kind."))
+    end
     return FiberProperties(TaylorBeta(data["beta_coefficients"]),
-                           SpatialOverlap(data["S_values"]), data["raman"],
+                           overlap, data["raman"],
                            modes, data["config"], data["n2"], data["omega0"])
 end
 

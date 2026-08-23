@@ -175,15 +175,40 @@ function _resolve_cp_compression(compression::CPCompression, fiber, sim,
         error("CPCompression.max_rank must be at least initial_rank.")
     compression.rank_growth > 1 || error("CPCompression.rank_growth must be greater than 1.")
     compression.target_error > 0 || error("CPCompression.target_error must be positive.")
+    compression.maxiter > 0 || error("CPCompression.maxiter must be positive.")
+    compression.check_every > 0 ||
+        error("CPCompression.check_every must be positive.")
+    _cp_validate_memory_controls(
+        compression.rank_block_size,
+        compression.max_workspace_bytes,
+        compression.workspace_memory_fraction)
+    if compression.symmetric_source && compression.check_symmetry
+        symmetry_defect = _cp_symmetric_tensor_defect(fiber.sr)
+        symmetry_defect <= max(1e-12, 100eps(Float64)) || throw(ArgumentError(
+            "CPCompression.symmetric_source=true requires a fully " *
+            "permutation-symmetric tensor; measured relative defect " *
+            "$symmetry_defect."))
+    end
     if compression.tensor !== nothing
         cp = _as_cp(compression.tensor)
-        err = _cp_relative_error(cp, fiber.sr)
+        err = if isempty(cp.λ)
+            iszero(norm(fiber.sr)) ? 0.0 : 1.0
+        else
+            error_block = _cp_workspace_limited_rank_block(
+                size(fiber.sr, 1), length(cp.λ), eltype(cp.U[1]);
+                rank_block_size=compression.rank_block_size,
+                max_workspace_bytes=compression.max_workspace_bytes)
+            _cp_relative_error(
+                cp, fiber.sr;
+                rank_block_size=error_block,
+                symmetric_source=compression.symmetric_source)
+        end
         return (; tensor=cp, rank=length(cp.λ), error=err,
                 target_error=compression.target_error, attempts=NamedTuple[],
                 fitted=false, elapsed=0.0)
     end
 
-    tensor = Float64.(fiber.sr)
+    tensor = fiber.sr isa Array{Float64,4} ? fiber.sr : Float64.(fiber.sr)
     rng = Random.MersenneTwister(compression.seed)
     rank = compression.initial_rank
     init = nothing
@@ -205,8 +230,18 @@ function _resolve_cp_compression(compression::CPCompression, fiber, sim,
                     verbose=compression.verbose,
                     device=backend.device,
                     synchronize=backend.synchronize,
+                    rank_block_size=compression.rank_block_size,
+                    max_workspace_bytes=compression.max_workspace_bytes,
+                    workspace_memory_fraction=
+                        compression.workspace_memory_fraction,
+                    reclaim_memory=compression.reclaim_memory,
+                    symmetric_source=compression.symmetric_source,
                 )
             else
+                resolved_rank_block_size = _cp_workspace_limited_rank_block(
+                    size(tensor, 1), rank, eltype(tensor);
+                    rank_block_size=compression.rank_block_size,
+                    max_workspace_bytes=compression.max_workspace_bytes)
                 cp_als_warm(
                     tensor, rank;
                     init=init,
@@ -216,10 +251,12 @@ function _resolve_cp_compression(compression::CPCompression, fiber, sim,
                     check_every=compression.check_every,
                     rng=rng,
                     verbose=compression.verbose,
+                    rank_block_size=resolved_rank_block_size,
+                    symmetric_source=compression.symmetric_source,
                 )
             end
         end
-        err = _cp_relative_error(cp, tensor)
+        err = history[end]
         push!(attempts, (; rank=rank, error=err, history=history, elapsed=elapsed))
         err <= compression.target_error &&
             return (; tensor=cp, rank=rank, error=err,
@@ -233,7 +270,12 @@ function _resolve_cp_compression(compression::CPCompression, fiber, sim,
     error("CPCompression did not meet target_error=$(compression.target_error) by max_rank=$(compression.max_rank). Last error was $last_err.")
 end
 
-_cp_relative_error(cp, tensor) = norm(cp_reconstruct(cp, tensor) .- tensor) / norm(tensor)
+function _cp_relative_error(cp, tensor;
+                            rank_block_size::Integer=length(cp.λ),
+                            symmetric_source::Bool=false)
+    return _cp_relative_error_from_mttkrp(
+        tensor, cp.λ, cp.U, rank_block_size; symmetric_source)
+end
 
 function _backend_tuple(problem)
     objs = backend_objects(problem)

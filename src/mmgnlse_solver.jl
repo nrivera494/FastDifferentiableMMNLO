@@ -161,9 +161,39 @@ function _mmgnlse_validate_initial_field(initial_field, parameters)
 end
 
 function _mmgnlse_validate_backend(backend)
-    backend in (:cpu, :cuda) || throw(ArgumentError(
-        "backend must be :cpu or :cuda; got $(repr(backend))."))
+    backend in (:cpu, :cuda, :cuda_cp_optimized, :cuda_optimized,
+                :cuda_cp_symmetric_experimental) ||
+        throw(ArgumentError(
+            "backend must be :cpu, :cuda, :cuda_cp_optimized, or " *
+            ":cuda_optimized; the opt-in experimental symmetric CP backend " *
+            "is :cuda_cp_symmetric_experimental. Got $(repr(backend))."))
     return backend
+end
+
+function _mmgnlse_validate_solver_backend(backend, parameters)
+    selected = _mmgnlse_validate_backend(backend)
+    if selected === :cuda_cp_optimized &&
+       !(parameters.S isa MMGNLSECPDecomposition)
+        throw(ArgumentError(
+            "backend=:cuda_cp_optimized requires " *
+            "MMGNLSEParameters.S to be an MMGNLSECPDecomposition; " *
+            "received $(typeof(parameters.S))."))
+    end
+    if selected === :cuda_cp_symmetric_experimental
+        parameters.S isa MMGNLSECPDecomposition || throw(ArgumentError(
+            "backend=:cuda_cp_symmetric_experimental requires " *
+            "MMGNLSEParameters.S to be an MMGNLSECPDecomposition; " *
+            "received $(typeof(parameters.S))."))
+        cp_is_symmetric(parameters.S) || throw(ArgumentError(
+            "backend=:cuda_cp_symmetric_experimental requires real weights " *
+            "and four exactly equal real CP factor matrices. Construct the " *
+            "tensor with cp_compress_symmetric_experimental or an equivalent " *
+            "exact tied-factor decomposition."))
+        parameters.S.metadata.npolarizations == 1 || throw(ArgumentError(
+            "backend=:cuda_cp_symmetric_experimental currently supports " *
+            "scalar (npolarizations=1) MMGNLSE tensors only."))
+    end
+    return selected
 end
 
 # Public component tensors use mode-fast order: all modes for x followed by
@@ -606,8 +636,170 @@ function _mmgnlse_rk4ip_step(field_w, parameters, z0, z1, cache)
            step / 6 .* (k1 .+ 2 .* k2 .+ 2 .* k3)) .+ step / 6 .* k4
 end
 
+mutable struct MMGNLSEScalarCPWorkspace{C,A}
+    cp::C
+    next_field::A
+    midpoint_base::A
+    stage::A
+    k1::A
+    k2::A
+    k3::A
+    k4::A
+    half::A
+    half_step::Float64
+    half_valid::Bool
+end
+
+function _mmgnlse_scalar_cp_workspace(
+    cp::MMGNLSECPDecomposition, nt::Int, nm::Int,
+)
+    legacy_cp = CPDecomposition(
+        λ=ComplexF64.(cp.λ),
+        U=ntuple(index -> ComplexF64.(cp.U[index]), 4))
+    cache = CPFastRHSCache(
+        legacy_cp, nt; T=Float64, flags=FFTW.MEASURE)
+    prototype = zeros(ComplexF64, nt, nm)
+    arrays = ntuple(_ -> similar(prototype), 8)
+    return MMGNLSEScalarCPWorkspace(
+        cache, arrays..., NaN, false)
+end
+
+function _mmgnlse_scalar_cp_nonlinear!(
+    out,
+    field_w,
+    solver_cache,
+    workspace::MMGNLSEScalarCPWorkspace,
+)
+    if !solver_cache.nonlinear_active
+        fill!(out, zero(eltype(out)))
+        return out
+    end
+    cache = workspace.cp
+    cache.at .= field_w
+    cache.fft_modes! * cache.at
+    mul!(cache.b2, cache.at, cache.u2)
+    mul!(cache.b3, cache.at, cache.u3)
+    cache.conj_at .= conj.(cache.at)
+    mul!(cache.b4, cache.conj_at, cache.u4)
+    _rank_product3!(cache.p, cache.b2, cache.b3, cache.b4)
+    mul!(cache.k, cache.p, cache.wu1t)
+    fraction = solver_cache.raman.fraction
+    cache.nonlinear .= (1 - fraction) .* cache.k
+    if !iszero(fraction)
+        _rank_product2!(cache.conv, cache.b3, cache.b4)
+        cache.ifft_rank! * cache.conv
+        combined = solver_cache.raman.ha .+ solver_cache.raman.hb
+        _rank_filter_time!(cache.conv, combined)
+        cache.fft_rank! * cache.conv
+        _rank_product2!(cache.p, cache.b2, cache.conv)
+        mul!(cache.k, cache.p, cache.wu1t)
+        cache.nonlinear .+= fraction .* cache.k
+    end
+    cache.ifft_modes! * cache.nonlinear
+    prefactor = reshape(solver_cache.nonlinear_prefactor, size(out, 1))
+    @inbounds for mode in axes(out, 2), time in axes(out, 1)
+        out[time, mode] =
+            prefactor[time] * cache.nonlinear[time, mode]
+    end
+    return out
+end
+
+function _mmgnlse_scalar_cp_step!(
+    out,
+    field_w,
+    parameters,
+    solver_cache,
+    workspace::MMGNLSEScalarCPWorkspace,
+    z0,
+    z1,
+)
+    step = Float64(z1 - z0)
+    if !workspace.half_valid || workspace.half_step != step
+        workspace.half .= exp.(
+            reshape(solver_cache.beta_operator, size(field_w)) .* (step / 2))
+        workspace.half_step = step
+        workspace.half_valid = true
+    end
+    if !solver_cache.nonlinear_active
+        out .= workspace.half .* workspace.half .* field_w
+        return out
+    end
+    workspace.midpoint_base .= workspace.half .* field_w
+    _mmgnlse_scalar_cp_nonlinear!(
+        workspace.k1, field_w, solver_cache, workspace)
+    workspace.k1 .*= workspace.half
+    workspace.stage .=
+        workspace.midpoint_base .+ (step / 2) .* workspace.k1
+    _mmgnlse_scalar_cp_nonlinear!(
+        workspace.k2, workspace.stage, solver_cache, workspace)
+    workspace.stage .=
+        workspace.midpoint_base .+ (step / 2) .* workspace.k2
+    _mmgnlse_scalar_cp_nonlinear!(
+        workspace.k3, workspace.stage, solver_cache, workspace)
+    workspace.stage .= workspace.half .*
+                       (workspace.midpoint_base .+ step .* workspace.k3)
+    _mmgnlse_scalar_cp_nonlinear!(
+        workspace.k4, workspace.stage, solver_cache, workspace)
+    out .= workspace.half .* (
+               workspace.midpoint_base .+
+               (step / 6) .* (
+                   workspace.k1 .+ 2 .* workspace.k2 .+
+                   2 .* workspace.k3)) .+
+           (step / 6) .* workspace.k4
+    return out
+end
+
+function _mmgnlse_use_scalar_cp_fast_path(parameters, initial_field)
+    return parameters.S isa MMGNLSECPDecomposition &&
+           parameters.S.metadata.layout == :spatial &&
+           size(initial_field, 3) == 1 &&
+           all(iszero, parameters.alpha) &&
+           all(iszero, parameters.gain)
+end
+
+function _mmgnlse_solve_rk4ip_scalar_cp(
+    initial_field, parameters, dz, saveat, cache,
+)
+    targets, save_every_step =
+        _mmgnlse_save_targets(parameters.length, saveat)
+    steps, saved = _mmgnlse_step_grid(
+        parameters.length, dz, targets, save_every_step)
+    nt, nm, _ = size(initial_field)
+    fields = Array{ComplexF64}(undef, nt, nm, 1, length(saved))
+    fields[:, :, :, 1] .= initial_field
+    field_w = reshape(ifft(initial_field, 1), nt, nm)
+    workspace = _mmgnlse_scalar_cp_workspace(parameters.S, nt, nm)
+    save_index = 2
+    tolerance = 32eps(Float64) *
+                max(1.0, Float64(parameters.length))
+    for index in 1:length(steps)-1
+        z0, z1 = steps[index], steps[index + 1]
+        _mmgnlse_scalar_cp_step!(
+            workspace.next_field, field_w, parameters,
+            cache, workspace, z0, z1)
+        field_w, workspace.next_field =
+            workspace.next_field, field_w
+        if save_index <= length(saved) &&
+           abs(z1 - saved[save_index]) <= tolerance
+            @views fields[:, :, 1, save_index] .= fft(field_w, 1)
+            save_index += 1
+        end
+    end
+    save_index == length(saved) + 1 ||
+        error("Not every requested plane was saved.")
+    return MMGNLSESolution(
+        z=collect(saved), fields=fields, parameters=parameters,
+        initial_field=copy(initial_field), dz=dz, method=RK4IP(),
+        cache=(integration_z=collect(steps), core=cache,
+               workspace=workspace))
+end
+
 function _mmgnlse_solve_rk4ip(initial_field, parameters, dz, saveat)
     cache = _mmgnlse_solver_cache(parameters)
+    if _mmgnlse_use_scalar_cp_fast_path(parameters, initial_field)
+        return _mmgnlse_solve_rk4ip_scalar_cp(
+            initial_field, parameters, dz, saveat, cache)
+    end
     targets, save_every_step = _mmgnlse_save_targets(parameters.length, saveat)
     steps, saved = _mmgnlse_step_grid(parameters.length, dz, targets, save_every_step)
     nt, nm, np = size(initial_field)
@@ -659,27 +851,62 @@ end
 """
     solve_mmgnlse(initial_field, parameters, dz;
                   method=RK4IP(), saveat=nothing, backend=:cpu,
-                  device=nothing, synchronize=true)
+                  device=nothing, synchronize=true,
+                  precision=:float64, adaptive=false,
+                  reltol=1e-6, abstol=1e-12,
+                  dzmin=0.0, dzmax=Inf, maxiters=10^7)
 
 Solve the MMGNLSE on the selected execution backend. Public fields retain axes
 `time × mode × polarization`; saved output adds a final `z` axis. RK4IP is the
 default fixed-step method. `Tsit5()` is accepted only in fixed-step mode.
 Every requested save coordinate and the exact fiber endpoint are landed on by
-shortening a step when necessary. `backend=:cuda` requires CUDA.jl and returns
-the same host-array solution representation as `backend=:cpu`.
+shortening a step when necessary. CUDA variants return the same host-array
+representation as `backend=:cpu`. For CP tensors, `backend=:cuda` selects the
+baseline CUDA CP implementation, `backend=:cuda_cp_optimized` selects only
+rank-agnostic CP optimizations, and `backend=:cuda_optimized` additionally
+enables rank-tuned choices. `backend=:cuda_cp_optimized` requires
+`parameters.S isa MMGNLSECPDecomposition`.
+`backend=:cuda_cp_symmetric_experimental` is an opt-in, forward-only backend
+for an exactly tied real symmetric CP. It enables the rank-tuned CP choices,
+one real modal projection, real backprojection, and the R2C/C2R Raman filter.
+Every forward CUDA RK4IP path,
+for either dense or CP overlap tensors, also accepts `precision=:mixed`, which
+retains a `ComplexF64` state and RK accumulation while evaluating the
+nonlinear right-hand side in `ComplexF32`. Set `adaptive=true` to use the
+embedded RK4IP error controller; in that case `dz` is the initial step and
+`reltol`, `abstol`, `dzmin`, and `dzmax` control accepted steps. Precision
+control and adaptive stepping do not apply to CPU, Tsit5, or adjoint paths.
 """
 function solve_mmgnlse(initial_field, parameters::MMGNLSEParameters, dz;
                        method=RK4IP(), saveat=nothing, backend=:cpu,
-                       device=nothing, synchronize::Bool=true)
+                       device=nothing, synchronize::Bool=true,
+                       precision::Symbol=:float64,
+                       adaptive::Bool=false,
+                       reltol::Real=1e-6,
+                       abstol::Real=1e-12,
+                       dzmin::Real=0.0,
+                       dzmax::Real=Inf,
+                       maxiters::Integer=10^7)
     field = _mmgnlse_validate_initial_field(initial_field, parameters)
     step = Float64(dz)
     isfinite(step) && step > 0 || throw(ArgumentError("dz must be finite and positive."))
-    selected_backend = _mmgnlse_validate_backend(backend)
-    if selected_backend === :cuda
+    precision in (:float64, :mixed) || throw(ArgumentError(
+        "precision must be :float64 or :mixed; got $(repr(precision))."))
+    selected_backend = _mmgnlse_validate_solver_backend(backend, parameters)
+    if selected_backend in (:cuda, :cuda_cp_optimized, :cuda_optimized,
+                            :cuda_cp_symmetric_experimental)
         return _mmgnlse_solve_cuda(
             field, parameters, step;
-            method, saveat, device, synchronize)
+            method, saveat, device, synchronize,
+            backend=selected_backend, precision, adaptive,
+            reltol=Float64(reltol), abstol=Float64(abstol),
+            dzmin=Float64(dzmin), dzmax=Float64(dzmax),
+            maxiters=Int(maxiters))
     end
+    precision === :float64 || throw(ArgumentError(
+        "precision=:mixed is supported only by the forward CUDA RK4IP path."))
+    adaptive && throw(ArgumentError(
+        "adaptive RK4IP is supported only by the forward CUDA RK4IP path."))
     if method isa RK4IP
         return _mmgnlse_solve_rk4ip(field, parameters, step, saveat)
     elseif nameof(typeof(method)) == :Tsit5
