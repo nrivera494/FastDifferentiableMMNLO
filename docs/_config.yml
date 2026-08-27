@@ -1,0 +1,5 @@
+title: FastDifferentiableMMNLO.jl
+description: Fast and differentiable simulations of ultrafast multimode nonlinear dynamics
+theme: jekyll-theme-minimal
+show_downloads: true
+markdown: kramdown
