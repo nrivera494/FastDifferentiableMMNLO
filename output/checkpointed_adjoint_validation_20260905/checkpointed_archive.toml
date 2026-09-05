@@ -1,0 +1,29 @@
+canonical_value_format = "PulsePropagation-canonical-value-v1"
+checksum_algorithm = "SHA-256"
+format = "PulsePropagation-MMGNLSE-cache"
+jld2_sha256 = "23fd078412447a6ec1db3c7a9bab63b9d0f933d5bd685e97d378fc86a7c7e6b6"
+kind = "MMGNLSESolution"
+parameters_checksum = "99e16b3ec285ac8dfcded386915b75f3aad3397fa24a47f3c7ae9f1e68bd0815"
+payload_checksum = "6aded599bd22fc28f17b6849f54228ad19d6c75eb419b312059e03bcaddf02f3"
+schema_version = 1
+
+[arrays]
+parameter_alpha = "9262fdf39802a03452188c55e7f60f1c68b817e2e8011cc8a27fab9edbae851c"
+parameter_beta_coefficients = "f140285b97c90063e90404f7a4ff87e454f3a6f51108429c5ec831b7318ee8b4"
+parameter_gain = "1b6596eb48195c42784c8a4a4637e52bff93b53c2ba60cf909c549eb275606fc"
+parameter_overlap_values = "6363051329c99cd23b4cf660dfbb446f6cd60c15a7a013aff6cb7f195a726247"
+solution_fields = "ac5d2db4f79b522fb15d28a9b0a6d6d13c6c8ee4f064d7ac8cc87c6b1cd5550b"
+solution_initial_field = "1c07c2b2e827a22dc40c0db4e830f9c364e5395a66125f6cc66e5b158c829917"
+solution_integration_z = "cf297f244133699a83c0a1f2d96e6c1ec142e5c412dad5ba9ccb279f90f0c14a"
+solution_z = "cf297f244133699a83c0a1f2d96e6c1ec142e5c412dad5ba9ccb279f90f0c14a"
+
+[provenance]
+backend = "cpu"
+dz = 0.0001
+field_shape = [32, 1, 1, 7]
+integration_steps = 7
+method = "RK4IP"
+parameters_checksum = "99e16b3ec285ac8dfcded386915b75f3aad3397fa24a47f3c7ae9f1e68bd0815"
+saved_planes = 7
+solution_kind = "MMGNLSESolution"
+stored_units = "power"

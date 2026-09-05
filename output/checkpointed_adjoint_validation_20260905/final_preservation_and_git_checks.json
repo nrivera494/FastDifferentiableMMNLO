@@ -1,0 +1,24 @@
+{
+  "main": "7c7f0e4bbc4883567c94ee1f8a8be18310272925",
+  "baseline": "d39bf98eac832533644dbbde650f0fd933579afe",
+  "reproduction_branch": "040dee79cd14ea54b815056ec5e290c78485d6f2",
+  "reproduction_worktree": "/Users/nr462/Desktop/FastDifferentiableMMNLO-six-reproduction-examples",
+  "backup_stash": "2a62f4bf7a9b8d7a29735cd3786de6bb952506a6",
+  "tracked_edits_preserved": 6,
+  "original_untracked_files_preserved": 66,
+  "reproduction_documents_moved": [
+    "corney2006_polarization_squeezing_plan.md",
+    "example_notebooks/agent_generated_examples/README.md"
+  ],
+  "excluded_commits_not_ancestors": [
+    "9579421",
+    "d5670ad",
+    "0810a41",
+    "5e29fad",
+    "4d41444",
+    "ac38834",
+    "040dee7"
+  ],
+  "main_tracked_tree_clean": true,
+  "original_notebooks_dependencies_schema_and_stochastic_code_unchanged": true
+}

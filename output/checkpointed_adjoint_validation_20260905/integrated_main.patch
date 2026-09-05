@@ -1,0 +1,1468 @@
+diff --git a/ext/mmgnlse_cuda_adjoint.jl b/ext/mmgnlse_cuda_adjoint.jl
+index d4c714f..99f9f03 100644
+--- a/ext/mmgnlse_cuda_adjoint.jl
++++ b/ext/mmgnlse_cuda_adjoint.jl
+@@ -1773,6 +1773,319 @@ function _cuda_mmgnlse_convert_adjoint_units(
+ end
+ 
+ 
++# -- Checkpointed discrete RK4IP adjoint -----------------------------------
++
++mutable struct CUDAMMGNLSEDiscreteAdjointWorkspace{A,N,F}
++    bar_midpoint::A
++    bar_k1::A
++    bar_k2::A
++    bar_k3::A
++    cotangent::A
++    nonlinear::N
++    forward::F
++end
++
++function _cuda_mmgnlse_discrete_adjoint_workspace(
++    prototype::CUDA.CuArray{ComplexF64,3},
++    cache::CUDAMMGNLSEForwardCache,
++)
++    nonlinear = if cache.overlap isa CUDAMMGNLSECP
++        _cuda_mmgnlse_cp_adjoint_workspace(prototype, cache.overlap)
++    elseif iszero(cache.raman.fraction)
++        _cuda_mmgnlse_dense_adjoint_workspace(prototype)
++    else
++        _cuda_mmgnlse_dense_raman_adjoint_workspace(
++            prototype, cache.overlap)
++    end
++    forward = nonlinear isa CUDAMMGNLSECPAdjointWorkspace ?
++              nonlinear.forward :
++              _cuda_mmgnlse_dense_forward_workspace(prototype, cache)
++    arrays = ntuple(_ -> similar(prototype), 5)
++    return CUDAMMGNLSEDiscreteAdjointWorkspace(
++        arrays..., nonlinear, forward)
++end
++
++function _cuda_mmgnlse_nonlinear_spectral_vjp!(
++    out,
++    field_w,
++    cotangent_w,
++    cache::CUDAMMGNLSEForwardCache,
++    workspace::CUDAMMGNLSEDiscreteAdjointWorkspace,
++)
++    if !cache.nonlinear_active
++        fill!(out, zero(eltype(out)))
++        return out
++    end
++    nonlinear = workspace.nonlinear
++    if nonlinear isa CUDAMMGNLSECPAdjointWorkspace
++        nonlinear.field_t .= field_w
++        nonlinear.fft_field! * nonlinear.field_t
++        if _cuda_mmgnlse_cp_is_optimized(cache.overlap)
++            # This is the same transform cancellation used by the continuous
++            # CUDA adjoint: fft(ifft(fft(cotangent_w))) leaves the spectral
++            # cotangent available for multiplication by conj(prefactor).
++            nonlinear.cubic_cotangent .=
++                cotangent_w .* conj.(cache.nonlinear_prefactor)
++            nonlinear.fft_cubic! * nonlinear.cubic_cotangent
++            _cuda_mmgnlse_cp_vjp_from_cubic!(
++                nonlinear.vjp_t, nonlinear.field_t,
++                nonlinear.cubic_cotangent, cache, nonlinear)
++        else
++            nonlinear.lambda_t .= cotangent_w
++            nonlinear.fft_lambda! * nonlinear.lambda_t
++            _cuda_mmgnlse_cp_vjp_nonlinear_baseline!(
++                nonlinear.vjp_t, nonlinear.field_t,
++                nonlinear.lambda_t, cache, nonlinear)
++        end
++        nonlinear.spectral_scratch .= nonlinear.vjp_t
++        nonlinear.ifft_vjp! * nonlinear.spectral_scratch
++        out .= nonlinear.spectral_scratch
++        return out
++    end
++
++    base = _cuda_mmgnlse_dense_adjoint_base(nonlinear)
++    base.field_t .= field_w
++    base.fft_field! * base.field_t
++    base.lambda_t .= cotangent_w
++    base.fft_lambda! * base.lambda_t
++    _cuda_mmgnlse_dense_vjp_nonlinear!(
++        base.vjp_t, base.field_t, base.lambda_t,
++        cache, nonlinear)
++    base.spectral_scratch .= base.vjp_t
++    base.ifft_vjp! * base.spectral_scratch
++    out .= base.spectral_scratch
++    return out
++end
++
++function _cuda_mmgnlse_discrete_forward_step!(
++    out,
++    field_w,
++    cache::CUDAMMGNLSEForwardCache,
++    workspace::CUDAMMGNLSEDiscreteAdjointWorkspace,
++    z0::Real,
++    z1::Real,
++)
++    if workspace.forward isa CUDAMMGNLSECPForwardWorkspace
++        return _cuda_mmgnlse_cp_rk4ip_step!(
++            out, field_w, cache, workspace.forward, z0, z1)
++    end
++    return _cuda_mmgnlse_dense_rk4ip_step!(
++        out, field_w, cache, workspace.forward, z0, z1)
++end
++
++function _cuda_mmgnlse_discrete_step_vjp!(
++    lambda_previous,
++    field_w,
++    lambda_next,
++    cache::CUDAMMGNLSEForwardCache,
++    workspace::CUDAMMGNLSEDiscreteAdjointWorkspace,
++    z0::Real,
++    z1::Real,
++)
++    state = _cuda_mmgnlse_forward_state_workspace(workspace.forward)
++    _cuda_mmgnlse_discrete_forward_step!(
++        state.next_field, field_w, cache, workspace, z0, z1)
++    if !cache.nonlinear_active
++        lambda_previous .=
++            conj.(state.from_midpoint .* state.to_midpoint) .* lambda_next
++        return lambda_previous
++    end
++
++    step = Float64(z1 - z0)
++    workspace.bar_midpoint .= conj.(state.from_midpoint) .* lambda_next
++    workspace.bar_k1 .= (step / 6) .* workspace.bar_midpoint
++    workspace.bar_k2 .= (step / 3) .* workspace.bar_midpoint
++    workspace.bar_k3 .= (step / 3) .* workspace.bar_midpoint
++
++    workspace.cotangent .= (step / 6) .* lambda_next
++    _cuda_mmgnlse_nonlinear_spectral_vjp!(
++        lambda_previous, state.stage, workspace.cotangent,
++        cache, workspace)
++    workspace.bar_midpoint .+=
++        conj.(state.from_midpoint) .* lambda_previous
++    workspace.bar_k3 .+=
++        step .* conj.(state.from_midpoint) .* lambda_previous
++
++    state.stage .= state.midpoint_base .+ (step / 2) .* state.k2
++    _cuda_mmgnlse_nonlinear_spectral_vjp!(
++        lambda_previous, state.stage, workspace.bar_k3,
++        cache, workspace)
++    workspace.bar_midpoint .+= lambda_previous
++    workspace.bar_k2 .+= (step / 2) .* lambda_previous
++
++    state.stage .= state.midpoint_base .+ (step / 2) .* state.k1
++    _cuda_mmgnlse_nonlinear_spectral_vjp!(
++        lambda_previous, state.stage, workspace.bar_k2,
++        cache, workspace)
++    workspace.bar_midpoint .+= lambda_previous
++    workspace.bar_k1 .+= (step / 2) .* lambda_previous
++
++    workspace.bar_k1 .*= conj.(state.to_midpoint)
++    _cuda_mmgnlse_nonlinear_spectral_vjp!(
++        lambda_previous, field_w, workspace.bar_k1,
++        cache, workspace)
++    lambda_previous .+=
++        conj.(state.to_midpoint) .* workspace.bar_midpoint
++    return lambda_previous
++end
++
++function _cuda_mmgnlse_store_discrete_adjoint!(
++    device_fields,
++    output_index::Integer,
++    lambda_w,
++    units::Symbol,
++    photon_scale_raw,
++)
++    lambda_t = fft(lambda_w, 1)
++    converted = _cuda_mmgnlse_convert_adjoint_units(
++        lambda_t, units, photon_scale_raw)
++    @views device_fields[:, :, :, output_index] .= converted
++    return device_fields
++end
++
++function _cuda_mmgnlse_solve_adjoint_checkpointed_discrete(
++    lambda_terminal,
++    parameters,
++    dz_adj;
++    forward_solution,
++    initial_field,
++    dz_forward,
++    units,
++    saveat,
++    checkpoint_stride,
++    cp_optimization,
++    backend,
++    synchronize,
++)
++    initial, integration_z, forward_step, source =
++        PulsePropagation._mmgnlse_discrete_forward_spec(
++            parameters, dz_adj;
++            forward_solution, initial_field, dz_forward)
++    checkpoint_indices, resolved_stride =
++        PulsePropagation._mmgnlse_checkpoint_indices(
++            length(integration_z), checkpoint_stride)
++    save_indices, saved_z =
++        PulsePropagation._mmgnlse_discrete_save_indices(
++            integration_z, saveat)
++    save_lookup = Dict(index => output for
++                       (output, index) in enumerate(save_indices))
++
++    cache = _cuda_mmgnlse_forward_cache(
++        parameters, cp_optimization;
++        dense_contraction=parameters.S isa
++                          PulsePropagation.MMGNLSECPDecomposition ?
++                          nothing : :custom)
++    initial_device = CUDA.CuArray(initial)
++    workspace = _cuda_mmgnlse_discrete_adjoint_workspace(
++        initial_device, cache)
++    state = _cuda_mmgnlse_forward_state_workspace(workspace.forward)
++    nt, nm, np = size(initial)
++    checkpoints = Array{ComplexF64,4}(
++        undef, nt, nm, np, length(checkpoint_indices))
++    field_w = ifft(initial_device, 1)
++    @views checkpoints[:, :, :, 1] .= Array(field_w)
++    checkpoint_cursor = 2
++    for step_index in 1:length(integration_z)-1
++        _cuda_mmgnlse_discrete_forward_step!(
++            state.next_field, field_w, cache, workspace,
++            integration_z[step_index], integration_z[step_index + 1])
++        field_w, state.next_field = state.next_field, field_w
++        if checkpoint_cursor <= length(checkpoint_indices) &&
++           step_index + 1 == checkpoint_indices[checkpoint_cursor]
++            @views checkpoints[:, :, :, checkpoint_cursor] .= Array(field_w)
++            checkpoint_cursor += 1
++        end
++    end
++    checkpoint_cursor == length(checkpoint_indices) + 1 || error(
++        "Not every CUDA forward checkpoint was stored.")
++
++    maximum_segment_steps = maximum(diff(checkpoint_indices))
++    segment_states = CUDA.zeros(
++        ComplexF64, nt, nm, np, maximum_segment_steps + 1)
++    replay = similar(initial_device)
++    lambda_w = CUDA.CuArray(ifftshift(
++        PulsePropagation._mmgnlse_validate_adjoint_terminal(
++            lambda_terminal, parameters), 1))
++    lambda_previous = similar(lambda_w)
++    device_fields = CUDA.zeros(
++        ComplexF64, nt, nm, np, length(saved_z))
++    photon_scale_raw = if units === :photon
++        centered_weights =
++            PulsePropagation._mmgnlse_photon_weights(parameters)
++        centered_scale = map(centered_weights) do weight
++            weight > 0 ? inv(sqrt(weight)) : 0.0
++        end
++        CUDA.CuArray(ifftshift(centered_scale, 1))
++    else
++        CUDA.zeros(Float64, 0)
++    end
++    if haskey(save_lookup, length(integration_z))
++        _cuda_mmgnlse_store_discrete_adjoint!(
++            device_fields, save_lookup[length(integration_z)],
++            lambda_w, units, photon_scale_raw)
++    end
++
++    for segment_index in length(checkpoint_indices)-1:-1:1
++        first_state = checkpoint_indices[segment_index]
++        last_state = checkpoint_indices[segment_index + 1]
++        segment_steps = last_state - first_state
++        copyto!(replay, Array(@view(checkpoints[:, :, :, segment_index])))
++        @views segment_states[:, :, :, 1] .= replay
++        for local_step in 1:segment_steps
++            global_step = first_state + local_step - 1
++            _cuda_mmgnlse_discrete_forward_step!(
++                state.next_field, replay, cache, workspace,
++                integration_z[global_step],
++                integration_z[global_step + 1])
++            replay, state.next_field = state.next_field, replay
++            @views segment_states[:, :, :, local_step + 1] .= replay
++        end
++        for local_step in segment_steps:-1:1
++            global_step = first_state + local_step - 1
++            _cuda_mmgnlse_discrete_step_vjp!(
++                lambda_previous,
++                @view(segment_states[:, :, :, local_step]),
++                lambda_w, cache, workspace,
++                integration_z[global_step],
++                integration_z[global_step + 1])
++            lambda_w, lambda_previous = lambda_previous, lambda_w
++            if haskey(save_lookup, global_step)
++                _cuda_mmgnlse_store_discrete_adjoint!(
++                    device_fields, save_lookup[global_step],
++                    lambda_w, units, photon_scale_raw)
++            end
++        end
++    end
++
++    synchronize && CUDA.synchronize()
++    checkpoint_bytes = sizeof(ComplexF64) * length(checkpoints)
++    replay_bytes = sizeof(ComplexF64) * length(segment_states)
++    host_cache = (
++        backend,
++        adjoint_mode=:discrete_rk4ip,
++        forward_solution=source,
++        integration_z=Float64.(integration_z),
++        forward_step,
++        checkpoint_stride=resolved_stride,
++        checkpoint_z=Float64.(integration_z[checkpoint_indices]),
++        checkpoint_count=length(checkpoint_indices),
++        checkpoint_bytes,
++        replay_peak_planes=maximum_segment_steps + 1,
++        replay_bytes,
++        frame=:spectral,
++        core=PulsePropagation._mmgnlse_solver_cache(parameters),
++        device=string(CUDA.device()),
++    )
++    return PulsePropagation.MMGNLSEAdjointSolution(
++        z=saved_z,
++        fields=Array(device_fields),
++        parameters=parameters,
++        units=units,
++        cache=host_cache,
++    )
++end
++
++
+ # -- Public CUDA adjoint backend -------------------------------------------
+ 
+ function PulsePropagation._mmgnlse_solve_adjoint_cuda(
+@@ -1788,6 +2101,8 @@ function PulsePropagation._mmgnlse_solve_adjoint_cuda(
+     device=nothing,
+     synchronize::Bool=true,
+     backend::Symbol=:cuda,
++    adjoint_mode::Symbol=:continuous,
++    checkpoint_stride=:auto,
+ )
+     CUDA.functional() || error(
+         "CUDA.jl is available but no functional CUDA device was found.")
+@@ -1797,10 +2112,18 @@ function PulsePropagation._mmgnlse_solve_adjoint_cuda(
+             "Supply exactly one of forward_solution or initial_field."))
+     isfinite(dz_adj) && dz_adj > 0 || throw(ArgumentError(
+         "dz_adj must be finite and positive."))
+-    PulsePropagation._mmgnlse_validate_adjoint_method(method)
+     units in (:power, :photon) || throw(ArgumentError(
+         "units must be :power or :photon."))
+     cp_optimization = _cuda_mmgnlse_cp_optimization(backend)
++    selected_adjoint_mode =
++        PulsePropagation._mmgnlse_validate_adjoint_mode(adjoint_mode)
++    if selected_adjoint_mode === :discrete_rk4ip
++        return _cuda_mmgnlse_solve_adjoint_checkpointed_discrete(
++            lambda_terminal, parameters, dz_adj;
++            forward_solution, initial_field, dz_forward, units, saveat,
++            checkpoint_stride, cp_optimization, backend, synchronize)
++    end
++    PulsePropagation._mmgnlse_validate_adjoint_method(method)
+ 
+     device_forward, host_forward = _cuda_mmgnlse_prepare_forward(
+         parameters;
+diff --git a/src/mmgnlse_adjoint_stochastic.jl b/src/mmgnlse_adjoint_stochastic.jl
+index 4fcf4a3..847bb28 100644
+--- a/src/mmgnlse_adjoint_stochastic.jl
++++ b/src/mmgnlse_adjoint_stochastic.jl
+@@ -267,6 +267,14 @@ function _mmgnlse_validate_adjoint_method(method)
+     return method
+ end
+ 
++function _mmgnlse_validate_adjoint_mode(mode)
++    selected = mode isa Symbol ? mode : Symbol(mode)
++    selected in (:continuous, :discrete_rk4ip) || throw(ArgumentError(
++        "adjoint_mode must be :continuous or :discrete_rk4ip; got " *
++        "$(repr(selected))."))
++    return selected
++end
++
+ function _mmgnlse_photon_weights(parameters::MMGNLSEParameters)
+     has_dof(parameters.domain.dofs, :time) || throw(ArgumentError(
+         "Photon normalization requires the :time degree of freedom."))
+@@ -291,12 +299,344 @@ function _mmgnlse_convert_adjoint_units(field_t, parameters, units::Symbol)
+     return fft(ifftshift(lambda_w, 1), 1)
+ end
+ 
++function _mmgnlse_resolve_checkpoint_stride(checkpoint_stride,
++                                             nsteps::Integer)
++    nsteps > 0 || throw(ArgumentError(
++        "A checkpointed adjoint requires at least one forward step."))
++    stride = if checkpoint_stride === :auto
++        min(Int(nsteps), 256)
++    elseif checkpoint_stride isa Integer
++        Int(checkpoint_stride)
++    else
++        throw(ArgumentError(
++            "checkpoint_stride must be :auto or a positive integer."))
++    end
++    stride > 0 || throw(ArgumentError(
++        "checkpoint_stride must be positive."))
++    return min(stride, Int(nsteps))
++end
++
++function _mmgnlse_checkpoint_indices(npoints::Integer,
++                                      checkpoint_stride)
++    npoints >= 2 || throw(ArgumentError(
++        "A checkpointed trajectory requires at least two grid points."))
++    stride = _mmgnlse_resolve_checkpoint_stride(
++        checkpoint_stride, npoints - 1)
++    indices = collect(1:stride:Int(npoints))
++    last(indices) == npoints || push!(indices, Int(npoints))
++    return indices, stride
++end
++
++function _mmgnlse_discrete_save_indices(integration_z::AbstractVector,
++                                         saveat)
++    if saveat === :steps
++        indices = collect(eachindex(integration_z))
++        return indices, Float64.(integration_z)
++    end
++    targets, _ = _mmgnlse_save_targets(
++        Float64(last(integration_z)), saveat)
++    scale = max(1.0, abs(first(integration_z)), abs(last(integration_z)))
++    tolerance = 128eps(Float64) * scale
++    indices = Vector{Int}(undef, length(targets))
++    for (target_index, target) in enumerate(targets)
++        right = searchsortedfirst(integration_z, target)
++        candidates = if right <= firstindex(integration_z)
++            (firstindex(integration_z),)
++        elseif right > lastindex(integration_z)
++            (lastindex(integration_z),)
++        else
++            (right - 1, right)
++        end
++        distances = map(index -> abs(integration_z[index] - target),
++                        candidates)
++        selected = candidates[argmin(distances)]
++        distances[argmin(distances)] <= tolerance || throw(ArgumentError(
++            "The discrete RK4IP adjoint can save only at forward step " *
++            "coordinates. Requested z=$target is not on the forward grid."))
++        indices[target_index] = selected
++    end
++    return indices, Float64.(integration_z[indices])
++end
++
++function _mmgnlse_discrete_forward_spec(
++    parameters::MMGNLSEParameters,
++    dz_adj::Real;
++    forward_solution,
++    initial_field,
++    dz_forward,
++)
++    (forward_solution === nothing) ⊻ (initial_field === nothing) ||
++        throw(ArgumentError(
++            "Supply exactly one of forward_solution or initial_field."))
++    isfinite(dz_adj) && dz_adj > 0 || throw(ArgumentError(
++        "dz_adj must be finite and positive."))
++
++    source = forward_solution
++    if forward_solution !== nothing
++        forward_solution isa MMGNLSESolution || throw(ArgumentError(
++            "forward_solution must be an MMGNLSESolution."))
++        forward_solution.parameters === parameters || throw(ArgumentError(
++            "forward_solution was constructed with a different " *
++            "MMGNLSEParameters object."))
++        dz_forward === nothing || throw(ArgumentError(
++            "dz_forward is only valid when initial_field is supplied."))
++        forward_solution.method isa RK4IP || throw(ArgumentError(
++            "adjoint_mode=:discrete_rk4ip requires an RK4IP forward solution."))
++        if forward_solution.cache !== nothing &&
++           hasproperty(forward_solution.cache, :adaptive) &&
++           getproperty(forward_solution.cache, :adaptive)
++            throw(ArgumentError(
++                "adjoint_mode=:discrete_rk4ip currently requires a " *
++                "fixed-step forward solution."))
++        end
++        if forward_solution.cache !== nothing &&
++           hasproperty(forward_solution.cache, :precision) &&
++           getproperty(forward_solution.cache, :precision) !== :float64
++            throw(ArgumentError(
++                "adjoint_mode=:discrete_rk4ip replays in Float64; " *
++                "rerun the forward solve with precision=:float64."))
++        end
++        step = Float64(forward_solution.dz)
++        initial = _mmgnlse_validate_initial_field(
++            forward_solution.initial_field, parameters)
++        cached_grid = _mmgnlse_cache_integration_z(forward_solution)
++        if cached_grid === nothing
++            targets, every_step = _mmgnlse_save_targets(
++                Float64(parameters.length), nothing)
++            integration_z, _ = _mmgnlse_step_grid(
++                Float64(parameters.length), step, targets, every_step)
++        else
++            integration_z = Float64.(cached_grid)
++        end
++    else
++        dz_forward === nothing && throw(ArgumentError(
++            "dz_forward is required when initial_field is supplied."))
++        isfinite(dz_forward) && dz_forward > 0 || throw(ArgumentError(
++            "dz_forward must be finite and positive."))
++        step = Float64(dz_forward)
++        initial = _mmgnlse_validate_initial_field(initial_field, parameters)
++        targets, every_step = _mmgnlse_save_targets(
++            Float64(parameters.length), nothing)
++        integration_z, _ = _mmgnlse_step_grid(
++            Float64(parameters.length), step, targets, every_step)
++    end
++
++    tolerance = 128eps(Float64) * max(1.0, abs(step), abs(float(dz_adj)))
++    abs(Float64(dz_adj) - step) <= tolerance || throw(ArgumentError(
++        "For adjoint_mode=:discrete_rk4ip, dz_adj must equal the nominal " *
++        "forward step ($step); got $(Float64(dz_adj))."))
++    first(integration_z) == 0 || throw(ArgumentError(
++        "The forward integration grid must begin at z=0."))
++    last(integration_z) == parameters.length || throw(ArgumentError(
++        "The forward integration grid must end at parameters.length."))
++    all(diff(integration_z) .> 0) || throw(ArgumentError(
++        "The forward integration grid must be strictly increasing."))
++    return initial, integration_z, step, source
++end
++
++"""Pull a cotangent through the nonlinear spectral RHS alone."""
++function _mmgnlse_nonlinear_spectral_vjp(
++    field_w,
++    cotangent_w,
++    parameters::MMGNLSEParameters,
++    cache,
++)
++    !cache.nonlinear_active && return zeros(ComplexF64, size(field_w))
++    field_t = fft(field_w, 1)
++    cotangent_t = fft(cotangent_w, 1)
++    return ifft(
++        _mmgnlse_vjp_nonlinear(
++            field_t, cotangent_t, parameters, cache),
++        1,
++    )
++end
++
++"""
++Pull a cotangent through one fixed-step RK4IP update.
++
++The stage nonlinearities delegate to `_mmgnlse_vjp_nonlinear`, so the Kerr,
++isotropic Raman, and anisotropic Raman conventions are identical to the
++continuous adjoint. Only the Runge--Kutta composition is differentiated here.
++"""
++function _mmgnlse_rk4ip_step_vjp(
++    field_w,
++    lambda_next,
++    parameters::MMGNLSEParameters,
++    z0::Real,
++    z1::Real,
++    cache,
++)
++    to_midpoint = _mmgnlse_linear_propagator(
++        parameters, z0, (z0 + z1) / 2, cache)
++    from_midpoint = _mmgnlse_linear_propagator(
++        parameters, (z0 + z1) / 2, z1, cache)
++    if !cache.nonlinear_active
++        return conj.(from_midpoint .* to_midpoint) .* lambda_next
++    end
++
++    step = z1 - z0
++    midpoint_base = to_midpoint .* field_w
++    k1 = to_midpoint .* _mmgnlse_nonlinear_spectral(
++        field_w, parameters, cache)
++    stage2 = midpoint_base .+ (step / 2) .* k1
++    k2 = _mmgnlse_nonlinear_spectral(stage2, parameters, cache)
++    stage3 = midpoint_base .+ (step / 2) .* k2
++    k3 = _mmgnlse_nonlinear_spectral(stage3, parameters, cache)
++    stage4 = from_midpoint .* (midpoint_base .+ step .* k3)
++
++    propagated = conj.(from_midpoint) .* lambda_next
++    bar_midpoint = copy(propagated)
++    bar_k1 = (step / 6) .* propagated
++    bar_k2 = (step / 3) .* propagated
++    bar_k3 = (step / 3) .* propagated
++
++    bar_stage = _mmgnlse_nonlinear_spectral_vjp(
++        stage4, (step / 6) .* lambda_next, parameters, cache)
++    bar_midpoint .+= conj.(from_midpoint) .* bar_stage
++    bar_k3 .+= step .* conj.(from_midpoint) .* bar_stage
++
++    bar_stage = _mmgnlse_nonlinear_spectral_vjp(
++        stage3, bar_k3, parameters, cache)
++    bar_midpoint .+= bar_stage
++    bar_k2 .+= (step / 2) .* bar_stage
++
++    bar_stage = _mmgnlse_nonlinear_spectral_vjp(
++        stage2, bar_k2, parameters, cache)
++    bar_midpoint .+= bar_stage
++    bar_k1 .+= (step / 2) .* bar_stage
++
++    lambda_previous = _mmgnlse_nonlinear_spectral_vjp(
++        field_w, conj.(to_midpoint) .* bar_k1, parameters, cache)
++    lambda_previous .+= conj.(to_midpoint) .* bar_midpoint
++    return lambda_previous
++end
++
++function _mmgnlse_store_discrete_adjoint!(
++    fields,
++    output_index::Integer,
++    lambda_w,
++    parameters,
++    units,
++)
++    lambda_t = fft(lambda_w, 1)
++    @views fields[:, :, :, output_index] .=
++        _mmgnlse_convert_adjoint_units(lambda_t, parameters, units)
++    return fields
++end
++
++function _mmgnlse_solve_adjoint_discrete_cpu(
++    lambda_terminal,
++    parameters::MMGNLSEParameters,
++    dz_adj::Real;
++    forward_solution,
++    initial_field,
++    dz_forward,
++    units::Symbol,
++    saveat,
++    checkpoint_stride,
++)
++    initial, integration_z, forward_step, source =
++        _mmgnlse_discrete_forward_spec(
++            parameters, dz_adj;
++            forward_solution, initial_field, dz_forward)
++    checkpoint_indices, resolved_stride = _mmgnlse_checkpoint_indices(
++        length(integration_z), checkpoint_stride)
++    save_indices, saved_z = _mmgnlse_discrete_save_indices(
++        integration_z, saveat)
++    save_lookup = Dict(index => output for
++                       (output, index) in enumerate(save_indices))
++
++    cache = _mmgnlse_solver_cache(parameters)
++    nt, nm, np = size(initial)
++    checkpoints = Array{ComplexF64,4}(
++        undef, nt, nm, np, length(checkpoint_indices))
++    field_w = ifft(initial, 1)
++    @views checkpoints[:, :, :, 1] .= field_w
++    checkpoint_cursor = 2
++    for step_index in 1:length(integration_z)-1
++        field_w = _mmgnlse_rk4ip_step(
++            field_w, parameters,
++            integration_z[step_index], integration_z[step_index + 1], cache)
++        if checkpoint_cursor <= length(checkpoint_indices) &&
++           step_index + 1 == checkpoint_indices[checkpoint_cursor]
++            @views checkpoints[:, :, :, checkpoint_cursor] .= field_w
++            checkpoint_cursor += 1
++        end
++    end
++    checkpoint_cursor == length(checkpoint_indices) + 1 || error(
++        "Not every forward checkpoint was stored.")
++
++    maximum_segment_steps = maximum(diff(checkpoint_indices))
++    segment_states = Array{ComplexF64,4}(
++        undef, nt, nm, np, maximum_segment_steps + 1)
++    lambda_w = ifftshift(
++        _mmgnlse_validate_adjoint_terminal(lambda_terminal, parameters), 1)
++    fields = Array{ComplexF64,4}(
++        undef, nt, nm, np, length(saved_z))
++    if haskey(save_lookup, length(integration_z))
++        _mmgnlse_store_discrete_adjoint!(
++            fields, save_lookup[length(integration_z)], lambda_w,
++            parameters, units)
++    end
++
++    for segment_index in length(checkpoint_indices)-1:-1:1
++        first_state = checkpoint_indices[segment_index]
++        last_state = checkpoint_indices[segment_index + 1]
++        segment_steps = last_state - first_state
++        @views segment_states[:, :, :, 1] .=
++            checkpoints[:, :, :, segment_index]
++        replay = copy(@view segment_states[:, :, :, 1])
++        for local_step in 1:segment_steps
++            global_step = first_state + local_step - 1
++            replay = _mmgnlse_rk4ip_step(
++                replay, parameters,
++                integration_z[global_step],
++                integration_z[global_step + 1], cache)
++            @views segment_states[:, :, :, local_step + 1] .= replay
++        end
++        for local_step in segment_steps:-1:1
++            global_step = first_state + local_step - 1
++            lambda_w = _mmgnlse_rk4ip_step_vjp(
++                @view(segment_states[:, :, :, local_step]),
++                lambda_w, parameters,
++                integration_z[global_step],
++                integration_z[global_step + 1], cache)
++            if haskey(save_lookup, global_step)
++                _mmgnlse_store_discrete_adjoint!(
++                    fields, save_lookup[global_step], lambda_w,
++                    parameters, units)
++            end
++        end
++    end
++
++    return MMGNLSEAdjointSolution(
++        z=saved_z,
++        fields=fields,
++        parameters=parameters,
++        units=units,
++        cache=(
++            backend=:cpu,
++            adjoint_mode=:discrete_rk4ip,
++            forward_solution=source,
++            integration_z=integration_z,
++            forward_step,
++            checkpoint_stride=resolved_stride,
++            checkpoint_z=integration_z[checkpoint_indices],
++            checkpoint_count=length(checkpoint_indices),
++            replay_peak_planes=maximum_segment_steps + 1,
++            frame=:spectral,
++            core=cache,
++        ),
++    )
++end
++
+ """
+     solve_adjoint(lambda, parameters, dz_adj;
+                   forward_solution=nothing, initial_field=nothing,
+                   dz_forward=nothing, method=Vern9(), units=:power,
+                   saveat=nothing, backend=:cpu, device=nothing,
+-                  synchronize=true)
++                  synchronize=true, adjoint_mode=:continuous,
++                  checkpoint_stride=:auto)
+ 
+ Integrate the continuous MMGNLSE adjoint backward in the interaction picture
+ with fixed-step `Vern9`. Dispersion and longitudinally varying gain/loss are
+@@ -315,6 +655,15 @@ host-array solution representation as the CPU backend and use the same CP
+ policy as `solve_mmgnlse`: `:cuda` is the baseline CP implementation,
+ `:cuda_cp_optimized` enables rank-agnostic CP optimizations only, and
+ `:cuda_optimized` additionally enables rank-tuned choices.
++
++Set `adjoint_mode=:discrete_rk4ip` to differentiate the exact fixed-step
++RK4IP forward map in Float64. Mixed-precision forward solutions are rejected
++because their replay would use a different numerical map. This mode requires
++`dz_adj == dz_forward` (or the nominal
++step of `forward_solution`) and replays bounded segments between uniformly
++spaced checkpoints. `checkpoint_stride=:auto` currently uses at most 256
++forward steps per replay segment. The discrete nonlinear pullback uses the
++same analytic Kerr and Raman VJP as the continuous adjoint.
+ """
+ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
+                        parameters::MMGNLSEParameters,
+@@ -327,7 +676,10 @@ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
+                        saveat=nothing,
+                        backend=:cpu,
+                        device=nothing,
+-                       synchronize::Bool=true)
++                       synchronize::Bool=true,
++                       adjoint_mode::Symbol=:continuous,
++                       checkpoint_stride=:auto)
++    selected_adjoint_mode = _mmgnlse_validate_adjoint_mode(adjoint_mode)
+     selected_backend = _mmgnlse_validate_solver_backend(backend, parameters)
+     selected_backend === :cuda_cp_symmetric_experimental &&
+         throw(ArgumentError(
+@@ -337,16 +689,23 @@ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
+         return _mmgnlse_solve_adjoint_cuda(
+             lambda_terminal, parameters, dz_adj;
+             forward_solution, initial_field, dz_forward, method, units,
+-            saveat, device, synchronize, backend=selected_backend)
++            saveat, device, synchronize, backend=selected_backend,
++            adjoint_mode=selected_adjoint_mode, checkpoint_stride)
+     end
+     (forward_solution === nothing) ⊻ (initial_field === nothing) ||
+         throw(ArgumentError(
+             "Supply exactly one of forward_solution or initial_field."))
+     isfinite(dz_adj) && dz_adj > 0 || throw(ArgumentError(
+         "dz_adj must be finite and positive."))
+-    _mmgnlse_validate_adjoint_method(method)
+     units in (:power, :photon) || throw(ArgumentError(
+         "units must be :power or :photon."))
++    if selected_adjoint_mode === :discrete_rk4ip
++        return _mmgnlse_solve_adjoint_discrete_cpu(
++            lambda_terminal, parameters, dz_adj;
++            forward_solution, initial_field, dz_forward, units, saveat,
++            checkpoint_stride)
++    end
++    _mmgnlse_validate_adjoint_method(method)
+ 
+     forward = if forward_solution !== nothing
+         forward_solution isa MMGNLSESolution || throw(ArgumentError(
+diff --git a/test/README.md b/test/README.md
+new file mode 100644
+index 0000000..af8fd9b
+--- /dev/null
++++ b/test/README.md
+@@ -0,0 +1,45 @@
++# Checkpointed adjoint tests
++
++The default adjoint remains continuous. Select the fixed-step discrete RK4IP
++adjoint explicitly with `adjoint_mode=:discrete_rk4ip`; set
++`checkpoint_stride` to control the number of replay steps held at once.
++The nominal adjoint and forward step sizes must agree. Adaptive forward
++solutions are rejected. Checkpointed replay uses Float64, and rejects a
++mixed-precision forward solution. This restriction does not change the
++existing mixed-precision forward or continuous-adjoint pathways.
++
++Run the CPU suite with:
++
++```sh
++julia --project=. test/runtests.jl
++```
++
++In an environment with this package and a functional CUDA installation, run:
++
++```sh
++julia --project=. test/cuda_checkpointed_adjoint.jl
++```
++
++The CUDA suite checks directional finite differences, CPU/GPU agreement,
++checkpoint-stride invariance, continuous-limit convergence, sparse-forward
++replay, multimode propagation, and polarization.
++
++`cuda_compatibility.jl` records small calculations using only the preexisting
++API, so the same script can run under both an old main checkout and a proposed
++integration. Use the same Julia and CUDA dependencies and the same GPU:
++
++```sh
++julia --project=/path/to/main /path/to/candidate/test/cuda_compatibility.jl main_gpu.jld2
++julia --project=/path/to/candidate /path/to/candidate/test/cuda_compatibility.jl candidate_gpu.jld2
++julia --project=/path/to/candidate /path/to/candidate/test/compare_gpu_results.jl main_gpu.jld2 candidate_gpu.jld2 gpu_comparison.toml
++```
++
++The comparison requires exact equality of the `results` dictionaries;
++timings and source paths are metadata, not
++numerical outputs. Both `errors` dictionaries must be empty. The audit records
++fields, saved coordinates, integration grids, adaptive counters, and noise
++samples. It covers dense and CP backends, both forward precisions, adaptive
++and fixed steps, forced GEMM contractions, stochastic ensembles, compression,
++and the Cartesian full-field solver. These short runs provide regression
++coverage; they do not establish production-scale memory requirements or
++long-distance accuracy.
+diff --git a/test/checkpointed_adjoint.jl b/test/checkpointed_adjoint.jl
+new file mode 100644
+index 0000000..68dabc9
+--- /dev/null
++++ b/test/checkpointed_adjoint.jl
+@@ -0,0 +1,173 @@
++using FFTW
++using LinearAlgebra
++using Random
++
++function _checkpoint_test_parameters(; raman=NoRaman(), n2=2.3e-20,
++                                     length_m=6.0e-4, cp=false)
++    grid = TimeGrid(16, 2.0)
++    domain = MMGNLSEDomain(degrees_of_freedom(:time), grid)
++    overlap = cp ?
++        MMGNLSECPDecomposition(
++            [1.0e10], ntuple(_ -> ones(1, 1), 4);
++            layout=:spatial, nmodes=1, npolarizations=1,
++            relative_error=0.0) :
++        reshape([1.0e10], 1, 1, 1, 1)
++    parameters = MMGNLSEParameters(
++        domain;
++        length=length_m,
++        beta=TaylorBeta(reshape([0.0, 0.0, -0.02], 3, 1)),
++        S=overlap,
++        n2,
++        omega0=2pi * 193.4,
++        raman,
++    )
++    t = time_axis(grid)
++    initial = reshape(
++        ComplexF64.(sqrt(2.0e3) .* exp.(-(t ./ 0.32) .^ 2) .*
++                   exp.(0.17im .* t)),
++        length(t), 1, 1,
++    )
++    return parameters, initial
++end
++
++function _centered_spectrum(field_t)
++    return fftshift(ifft(field_t, 1), 1)
++end
++
++function _directional_derivative_check(parameters, initial, dz; seed)
++    rng = MersenneTwister(seed)
++    direction = randn(rng, ComplexF64, size(initial))
++    direction ./= norm(direction)
++    terminal = randn(rng, ComplexF64, size(initial))
++    terminal ./= norm(terminal)
++    epsilon = 2.0e-6 * norm(initial)
++
++    objective(input) = real(sum(conj.(terminal) .* _centered_spectrum(
++        solve_mmgnlse(input, parameters, dz).fields[:, :, :, end])))
++    finite_difference = (
++        objective(initial .+ epsilon .* direction) -
++        objective(initial .- epsilon .* direction)
++    ) / (2epsilon)
++
++    adjoint = solve_adjoint(
++        terminal, parameters, dz;
++        initial_field=initial,
++        dz_forward=dz,
++        adjoint_mode=:discrete_rk4ip,
++        checkpoint_stride=2,
++    )
++    initial_cotangent = get_spectral_field(adjoint; z=:initial)
++    predicted = real(sum(
++        conj.(initial_cotangent) .* _centered_spectrum(direction)))
++    return finite_difference, predicted, adjoint
++end
++
++@testset "Checkpointed discrete RK4IP adjoint" begin
++    @testset "single-step VJP directional differences" begin
++        for (raman, cp, seed) in (
++            (NoRaman(), false, 101),
++            (AnisotropicRaman(), false, 151),
++            (AnisotropicRaman(), true, 202),
++        )
++            parameters, initial = _checkpoint_test_parameters(
++                ; raman, cp, length_m=1.0e-4)
++            cache = PulsePropagation._mmgnlse_solver_cache(parameters)
++            field_w = ifft(initial, 1)
++            rng = MersenneTwister(seed)
++            direction = randn(rng, ComplexF64, size(field_w))
++            direction ./= norm(direction)
++            cotangent = randn(rng, ComplexF64, size(field_w))
++            cotangent ./= norm(cotangent)
++            epsilon = 2.0e-6 * norm(field_w)
++            pairing(input) = real(sum(conj.(cotangent) .*
++                PulsePropagation._mmgnlse_rk4ip_step(
++                    input, parameters, 0.0, 1.0e-4, cache)))
++            finite_difference = (
++                pairing(field_w .+ epsilon .* direction) -
++                pairing(field_w .- epsilon .* direction)
++            ) / (2epsilon)
++            vjp = PulsePropagation._mmgnlse_rk4ip_step_vjp(
++                field_w, cotangent, parameters, 0.0, 1.0e-4, cache)
++            predicted = real(sum(conj.(vjp) .* direction))
++            @test predicted ≈ finite_difference rtol=2e-6 atol=2e-8
++        end
++    end
++
++    @testset "full-map differences and checkpoint invariance" begin
++        for (raman, cp, seed) in (
++            (NoRaman(), false, 303),
++            (AnisotropicRaman(), false, 353),
++            (AnisotropicRaman(), true, 404),
++        )
++            parameters, initial = _checkpoint_test_parameters(; raman, cp)
++            finite_difference, predicted, adjoint =
++                _directional_derivative_check(
++                    parameters, initial, 1.0e-4; seed)
++            @test predicted ≈ finite_difference rtol=3e-6 atol=3e-8
++            @test adjoint.cache.checkpoint_stride == 2
++            @test adjoint.cache.replay_peak_planes == 3
++
++            terminal = get_spectral_field(adjoint; z=:final)
++            stride_one = solve_adjoint(
++                terminal, parameters, 1.0e-4;
++                initial_field=initial, dz_forward=1.0e-4,
++                adjoint_mode=:discrete_rk4ip, checkpoint_stride=1)
++            stride_full = solve_adjoint(
++                terminal, parameters, 1.0e-4;
++                initial_field=initial, dz_forward=1.0e-4,
++                adjoint_mode=:discrete_rk4ip, checkpoint_stride=100)
++            @test get_spectral_field(stride_one; z=:initial) ≈
++                  get_spectral_field(stride_full; z=:initial) rtol=2e-13
++        end
++    end
++
++    @testset "continuous limit and validation" begin
++        linear_parameters, initial = _checkpoint_test_parameters(
++            ; n2=0.0, length_m=6.0e-4)
++        terminal = reshape(ComplexF64.(range(0.2, 1.1; length=16)), 16, 1, 1)
++        forward = solve_mmgnlse(
++            initial, linear_parameters, 1.0e-4; saveat=:steps)
++        discrete = solve_adjoint(
++            terminal, linear_parameters, 1.0e-4;
++            forward_solution=forward,
++            adjoint_mode=:discrete_rk4ip,
++            checkpoint_stride=3)
++        continuous = solve_adjoint(
++            terminal, linear_parameters, 1.0e-4;
++            forward_solution=forward)
++        @test get_spectral_field(discrete; z=:initial) ≈
++              get_spectral_field(continuous; z=:initial) rtol=5e-13
++
++        nonlinear_parameters, nonlinear_initial = _checkpoint_test_parameters(
++            ; raman=AnisotropicRaman(), cp=true, length_m=8.0e-4)
++        errors = Float64[]
++        for dz in (2.0e-4, 1.0e-4)
++            nonlinear_forward = solve_mmgnlse(
++                nonlinear_initial, nonlinear_parameters, dz; saveat=:steps)
++            discrete = solve_adjoint(
++                terminal, nonlinear_parameters, dz;
++                forward_solution=nonlinear_forward,
++                adjoint_mode=:discrete_rk4ip,
++                checkpoint_stride=2)
++            continuous = solve_adjoint(
++                terminal, nonlinear_parameters, dz;
++                forward_solution=nonlinear_forward)
++            numerator = norm(
++                get_spectral_field(discrete; z=:initial) .-
++                get_spectral_field(continuous; z=:initial))
++            denominator = norm(get_spectral_field(discrete; z=:initial))
++            push!(errors, numerator / denominator)
++        end
++        @test errors[2] < errors[1]
++        @test errors[2] < 2e-4
++
++        @test_throws ArgumentError solve_adjoint(
++            terminal, nonlinear_parameters, 2.0e-4;
++            initial_field=nonlinear_initial, dz_forward=1.0e-4,
++            adjoint_mode=:discrete_rk4ip)
++        @test_throws ArgumentError solve_adjoint(
++            terminal, nonlinear_parameters, 1.0e-4;
++            initial_field=nonlinear_initial, dz_forward=1.0e-4,
++            adjoint_mode=:discrete_rk4ip, saveat=[0.0, 1.5e-4, 8.0e-4])
++    end
++end
+diff --git a/test/compare_gpu_results.jl b/test/compare_gpu_results.jl
+new file mode 100644
+index 0000000..12dfab1
+--- /dev/null
++++ b/test/compare_gpu_results.jl
+@@ -0,0 +1,31 @@
++using JLD2, LinearAlgebra, TOML
++length(ARGS)==3 || error("Usage: compare_gpu_results.jl main.jld2 candidate.jld2 report.toml")
++a=JLD2.load(ARGS[1]); b=JLD2.load(ARGS[2])
++@assert isempty(a["errors"]) a["errors"]
++@assert isempty(b["errors"]) b["errors"]
++@assert keys(a["results"]) == keys(b["results"])
++exact=String[]; differences=Dict{String,Any}()
++for key in sort!(collect(keys(a["results"])))
++    x=a["results"][key]; y=b["results"][key]
++    if isequal(x,y)
++        push!(exact,key)
++    elseif x isa AbstractArray && y isa AbstractArray
++        @assert size(x)==size(y)
++        differences[key]=Dict("relative_error"=>norm(y-x)/max(norm(x),eps()),
++            "max_absolute_error"=>maximum(abs.(y-x)))
++    else
++        differences[key]=Dict("main"=>string(x),"candidate"=>string(y))
++    end
++end
++report=Dict("exact_count"=>length(exact),"total_count"=>length(a["results"]),
++    "exact"=>exact,"differences"=>differences,
++    "main_metadata"=>Dict(string(k)=>string(v) for (k,v) in pairs(a["metadata"])),
++    "candidate_metadata"=>Dict(string(k)=>string(v) for (k,v) in pairs(b["metadata"])))
++open(ARGS[3],"w") do io
++    TOML.print(io,report;sorted=true)
++end
++println("Exact GPU outputs: ",length(exact),"/",length(a["results"]))
++for key in sort!(collect(keys(differences)))
++    println("DIFFERENCE ",key," ",differences[key])
++end
++isempty(differences) || error("GPU outputs differ; review report before integration.")
+diff --git a/test/cuda_checkpointed_adjoint.jl b/test/cuda_checkpointed_adjoint.jl
+new file mode 100644
+index 0000000..0541c20
+--- /dev/null
++++ b/test/cuda_checkpointed_adjoint.jl
+@@ -0,0 +1,187 @@
++using CUDA
++using FFTW
++using LinearAlgebra
++using Random
++using Test
++using PulsePropagation
++
++CUDA.functional() || error("A functional CUDA device is required.")
++CUDA.allowscalar(false)
++
++function _cuda_checkpoint_parameters(; raman=NoRaman(), cp=false,
++                                     length_m=6.0e-4)
++    grid = TimeGrid(16, 2.0)
++    domain = MMGNLSEDomain(degrees_of_freedom(:time), grid)
++    overlap = cp ?
++        MMGNLSECPDecomposition(
++            [1.0e10], ntuple(_ -> ones(1, 1), 4);
++            layout=:spatial, nmodes=1, npolarizations=1,
++            relative_error=0.0) :
++        reshape([1.0e10], 1, 1, 1, 1)
++    parameters = MMGNLSEParameters(
++        domain;
++        length=length_m,
++        beta=TaylorBeta(reshape([0.0, 0.0, -0.02], 3, 1)),
++        S=overlap,
++        n2=2.3e-20,
++        omega0=2pi * 193.4,
++        raman,
++    )
++    t = time_axis(grid)
++    initial = reshape(
++        ComplexF64.(sqrt(2.0e3) .* exp.(-(t ./ 0.32) .^ 2) .*
++                   exp.(0.17im .* t)),
++        length(t), 1, 1,
++    )
++    return parameters, initial
++end
++
++_cuda_centered_spectrum(field_t) = fftshift(ifft(field_t, 1), 1)
++
++function _cuda_checkpoint_directional_check(parameters, initial, dz,
++                                            backend; seed)
++    rng = MersenneTwister(seed)
++    direction = randn(rng, ComplexF64, size(initial))
++    direction ./= norm(direction)
++    terminal = randn(rng, ComplexF64, size(initial))
++    terminal ./= norm(terminal)
++    epsilon = 2.0e-6 * norm(initial)
++    objective(input) = real(sum(conj.(terminal) .*
++        get_spectral_field(solve_mmgnlse(
++            input, parameters, dz; backend=backend))))
++    finite_difference = (
++        objective(initial .+ epsilon .* direction) -
++        objective(initial .- epsilon .* direction)
++    ) / (2epsilon)
++    adjoint = solve_adjoint(
++        terminal, parameters, dz;
++        initial_field=initial,
++        dz_forward=dz,
++        backend=backend,
++        adjoint_mode=:discrete_rk4ip,
++        checkpoint_stride=2,
++    )
++    predicted = real(sum(
++        conj.(get_spectral_field(adjoint; z=:initial)) .*
++        _cuda_centered_spectrum(direction)))
++    return finite_difference, predicted, terminal, adjoint
++end
++
++@testset "CUDA checkpointed discrete RK4IP adjoint" begin
++    for (name, raman, cp, backend, seed) in (
++        ("dense Kerr", NoRaman(), false, :cuda, 501),
++        ("dense anisotropic Raman", AnisotropicRaman(), false,
++         :cuda, 503),
++        ("CP anisotropic Raman", AnisotropicRaman(), true,
++         :cuda_cp_optimized, 502),
++    )
++        @testset "$name directional derivative" begin
++            parameters, initial = _cuda_checkpoint_parameters(; raman, cp)
++            finite_difference, predicted, terminal, adjoint =
++                _cuda_checkpoint_directional_check(
++                    parameters, initial, 1.0e-4, backend; seed)
++            @test predicted ≈ finite_difference rtol=2e-5 atol=2e-7
++            @test adjoint.cache.checkpoint_count == 4
++            @test adjoint.cache.replay_peak_planes == 3
++
++            stride_one = solve_adjoint(
++                terminal, parameters, 1.0e-4;
++                initial_field=initial, dz_forward=1.0e-4,
++                backend=backend, adjoint_mode=:discrete_rk4ip,
++                checkpoint_stride=1)
++            stride_full = solve_adjoint(
++                terminal, parameters, 1.0e-4;
++                initial_field=initial, dz_forward=1.0e-4,
++                backend=backend, adjoint_mode=:discrete_rk4ip,
++                checkpoint_stride=100)
++            @test get_spectral_field(stride_one; z=:initial) ≈
++                  get_spectral_field(stride_full; z=:initial) rtol=2e-11
++
++            cpu = solve_adjoint(
++                terminal, parameters, 1.0e-4;
++                initial_field=initial, dz_forward=1.0e-4,
++                backend=:cpu, adjoint_mode=:discrete_rk4ip,
++                checkpoint_stride=2)
++            @test get_spectral_field(adjoint; z=:initial) ≈
++                  get_spectral_field(cpu; z=:initial) rtol=2e-10
++        end
++    end
++
++    @testset "continuous limit" begin
++        parameters, initial = _cuda_checkpoint_parameters(
++            ; raman=AnisotropicRaman(), cp=true, length_m=8.0e-4)
++        terminal = reshape(ComplexF64.(range(0.2, 1.1; length=16)),
++                           16, 1, 1)
++        errors = Float64[]
++        for dz in (2.0e-4, 1.0e-4)
++            forward = solve_mmgnlse(
++                initial, parameters, dz;
++                backend=:cuda_cp_optimized, saveat=:steps)
++            discrete = solve_adjoint(
++                terminal, parameters, dz;
++                forward_solution=forward,
++                backend=:cuda_cp_optimized,
++                adjoint_mode=:discrete_rk4ip,
++                checkpoint_stride=2)
++            continuous = solve_adjoint(
++                terminal, parameters, dz;
++                forward_solution=forward,
++                backend=:cuda_cp_optimized)
++            initial_discrete = get_spectral_field(discrete; z=:initial)
++            push!(errors, norm(initial_discrete .-
++                               get_spectral_field(continuous; z=:initial)) /
++                          norm(initial_discrete))
++        end
++        @test errors[2] < errors[1]
++        @test errors[2] < 2e-4
++    end
++end
++
++
++include("cuda_compatibility_fixtures.jl")
++
++@testset "Multimode and polarization checkpointed CUDA adjoints" begin
++    for (name,np,cp,raman) in (
++        ("dense multimode Kerr",1,false,NoRaman()),
++        ("dense isotropic Raman",1,false,AgarwalRaman()),
++        ("CP isotropic Raman",1,true,AgarwalRaman()),
++        ("dense polarized Raman",2,false,AnisotropicRaman()),
++        ("CP multimode Raman",1,true,AnisotropicRaman()),
++        ("CP polarized Raman",2,true,AnisotropicRaman()),
++    )
++        @testset "$name" begin
++            parameters,initial = cuda_compatibility_fixture(;nt=32,nm=3,np,cp,raman)
++            backend = cp ? :cuda_cp_optimized : :cuda
++            dz = 5e-4
++            finite_difference,predicted,terminal,adjoint =
++                _cuda_checkpoint_directional_check(parameters,initial,dz,backend;seed=963)
++            @test predicted ≈ finite_difference rtol=2e-5 atol=2e-7
++            cpu = solve_adjoint(terminal,parameters,dz;
++                initial_field=initial,dz_forward=dz,adjoint_mode=:discrete_rk4ip,
++                checkpoint_stride=3)
++            @test get_spectral_field(adjoint;z=:initial) ≈
++                get_spectral_field(cpu;z=:initial) rtol=2e-9
++            forward = solve_mmgnlse(initial,parameters,dz;backend)
++            replayed = solve_adjoint(terminal,parameters,dz;
++                forward_solution=forward,backend,adjoint_mode=:discrete_rk4ip,
++                checkpoint_stride=3,saveat=:steps)
++            @test get_spectral_field(adjoint;z=:initial) ≈
++                get_spectral_field(replayed;z=:initial) rtol=2e-11
++            @test replayed.cache.replay_peak_planes <= 4
++            @test replayed.cache.checkpoint_count < length(replayed.cache.integration_z)
++        end
++    end
++end
++
++
++@testset "Checkpointed replay rejects mixed-precision forward maps" begin
++    parameters,initial = cuda_compatibility_fixture(;nt=32,nm=3,cp=true)
++    forward = solve_mmgnlse(initial,parameters,5e-4;
++        backend=:cuda_cp_optimized,precision=:mixed)
++    terminal = ones(ComplexF64,size(initial))
++    @test_throws ArgumentError solve_adjoint(terminal,parameters,5e-4;
++        forward_solution=forward,backend=:cuda_cp_optimized,
++        adjoint_mode=:discrete_rk4ip)
++    @test_throws ArgumentError solve_adjoint(terminal,parameters,5e-4;
++        forward_solution=forward,backend=:cpu,adjoint_mode=:discrete_rk4ip)
++end
+diff --git a/test/cuda_compatibility.jl b/test/cuda_compatibility.jl
+new file mode 100644
+index 0000000..e886227
+--- /dev/null
++++ b/test/cuda_compatibility.jl
+@@ -0,0 +1,179 @@
++# Run the same script under each revision's project on one GPU:
++# julia --project=/path/to/revision test/cuda_compatibility.jl output.jld2
++# This records numerical results for cross-revision comparison; it does not
++# require the checkpointed API, so the unchanged script also runs on old main.
++using CUDA, FFTW, LinearAlgebra, Random, JLD2, Test
++using PulsePropagation
++include("cuda_compatibility_fixtures.jl")
++
++CUDA.functional() || error("A functional CUDA device is required.")
++CUDA.allowscalar(false)
++BLAS.set_num_threads(1)
++FFTW.set_num_threads(1)
++length(ARGS) == 1 || error("Supply a destination JLD2 path.")
++results = Dict{String,Any}()
++timings = Dict{String,Float64}()
++errors = Dict{String,String}()
++
++function record_solution!(results, key, solution)
++    @test all(isfinite, solution.fields)
++    results[key*"/fields"] = solution.fields
++    results[key*"/z"] = solution.z
++    if hasproperty(solution,:cache) && solution.cache !== nothing
++        for property in (:integration_z,:accepted_steps,:rejected_steps,:rhs_evaluations)
++            hasproperty(solution.cache,property) || continue
++            results[key*"/"*string(property)] = getproperty(solution.cache,property)
++        end
++    end
++end
++
++function audit_case(f, key)
++    println("START ",key); flush(stdout)
++    started = time()
++    try
++        f()
++        CUDA.synchronize()
++        println("PASS ",key)
++    catch err
++        errors[key] = sprint(showerror,err,catch_backtrace())
++        println("ERROR ",key,": ",sprint(showerror,err))
++    finally
++        timings[key] = time()-started
++        flush(stdout)
++    end
++end
++
++try
++@testset "Existing GPU notebook pathways" begin
++    for (rname,raman) in (("kerr",NoRaman()),("agarwal",AgarwalRaman()),
++                         ("anisotropic",AnisotropicRaman()))
++        for (name,nm,np,cp,backend) in (
++            ("scalar",1,1,false,:cuda),
++            ("dense",3,1,false,:cuda),
++            ("cp_baseline",3,1,true,:cuda),
++            ("cp_optimized",3,1,true,:cuda_cp_optimized),
++            ("polarized_dense",2,2,false,:cuda),
++            ("polarized_cp",2,2,true,:cuda_cp_optimized))
++            parameters,initial = cuda_compatibility_fixture(;nm,np,cp,raman)
++            dz = 5e-4
++            cpu = solve_mmgnlse(initial,parameters,dz;saveat=[0.,parameters.length])
++            for precision in (:float64,:mixed), adaptive in (false,true)
++                key = "$rname/$name/$precision/adaptive$adaptive"
++                audit_case(key) do
++                    solution = solve_mmgnlse(initial,parameters,dz;
++                        backend,precision,adaptive,saveat=[0.,parameters.length],
++                        reltol=1e-7,abstol=1e-10)
++                    record_solution!(results,key,solution)
++                    # Independent CPU check. Cross-revision equality is assessed
++                    # separately, without using this CPU/GPU precision tolerance.
++                    tolerance = precision === :float64 ? 2e-7 : 2e-5
++                    @test norm(solution.fields-cpu.fields)/norm(cpu.fields) < tolerance
++                end
++            end
++            key = "$rname/$name/continuous_adjoint"
++            audit_case(key) do
++                terminal = randn(MersenneTwister(194),ComplexF64,size(initial))
++                terminal ./= norm(terminal)
++                forward = solve_mmgnlse(initial,parameters,dz;backend,saveat=:steps)
++                adjoint = solve_adjoint(terminal,parameters,dz;
++                    forward_solution=forward,backend,saveat=:steps)
++                record_solution!(results,key,adjoint)
++                cpu_forward = solve_mmgnlse(initial,parameters,dz;saveat=:steps)
++                cpu_adjoint = solve_adjoint(terminal,parameters,dz;
++                    forward_solution=cpu_forward,saveat=:steps)
++                # Existing CPU/CUDA continuous solvers have small numerical
++                # differences. Record these for exact before/after comparison;
++                # the one-ppm smoke bound is not the regression tolerance.
++                cpu_error = norm(adjoint.fields-cpu_adjoint.fields)/norm(cpu_adjoint.fields)
++                results[key*"/cpu_relative_error"] = cpu_error
++                @test cpu_error < 1e-6
++            end
++        end
++    end
++
++    # Explicitly select kernels normally chosen for much larger dense tensors.
++    for np in (1,2), (contraction,raman) in
++        (("gemm",AnisotropicRaman()),("symmetric_gemm",NoRaman())),
++        precision in (:float64,:mixed)
++        key = "dense_contraction/$contraction/polarizations$np/$precision"
++        audit_case(key) do
++            parameters,initial = cuda_compatibility_fixture(;np,raman)
++            solution = withenv("PULSEPROPAGATION_CUDA_DENSE_CONTRACTION"=>contraction) do
++                solve_mmgnlse(initial,parameters,5e-4;backend=:cuda,precision)
++            end
++            record_solution!(results,key,solution)
++            cpu = solve_mmgnlse(initial,parameters,5e-4)
++            @test norm(solution.fields-cpu.fields)/norm(cpu.fields) < 2e-5
++        end
++    end
++
++    for cp in (false,true), precision in (:float64,:mixed)
++        key = "stochastic/cp$cp/$precision"
++        audit_case(key) do
++            parameters,initial = cuda_compatibility_fixture(;cp)
++            backend = cp ? :cuda_cp_optimized : :cuda
++            ensemble = solve_mmgnlse_stochastic(initial,parameters,5e-4,3;
++                backend,precision,noise=10.,seed=711)
++            record_solution!(results,key,ensemble)
++            results[key*"/noise"] = ensemble.noise.photon_noise
++            results[key*"/weights"] = ensemble.noise.weights
++        end
++    end
++
++    audit_case("adaptive_rejections") do
++        parameters,initial = cuda_compatibility_fixture(;
++            cp=true,length_m=0.05,peak_power=1e5)
++        solution = solve_mmgnlse(initial,parameters,0.05;
++            backend=:cuda_cp_optimized,adaptive=true,reltol=1e-8,abstol=1e-10)
++        record_solution!(results,"adaptive_rejections",solution)
++        @test solution.cache.rejected_steps > 0
++    end
++
++    audit_case("cp_tile_boundaries") do
++        parameters,initial = cuda_compatibility_fixture(;nt=96,nm=17,rank=33,cp=true)
++        solution = solve_mmgnlse(initial,parameters,5e-4;
++            backend=:cuda_cp_optimized,precision=:mixed)
++        record_solution!(results,"cp_tile_boundaries",solution)
++    end
++
++    audit_case("compression") do
++        parameters,initial = cuda_compatibility_fixture(;nm=3,rank=3)
++        compressed = cp_compress(parameters.S;backend=:cuda,error=1e-3,
++            min_rank=3,rank_step=2,max_rank=9,maxiter=120,seed=442,
++            tolerance=1e-8,ridge=1e-10)
++        reconstructed = cp_reconstruct_mmgnlse(compressed)
++        results["compression/tensor"] = reconstructed
++        results["compression/relative_error"] = compressed.relative_error
++        @test compressed.relative_error <= 1e-3
++    end
++
++    for (rname,raman) in (("kerr",NoRaman()),("anisotropic",AnisotropicRaman()))
++        key = "full_field/$rname"
++        audit_case(key) do
++            grid = TimeGrid(32,4.)
++            xy = TransverseGrid(Nx=8,Ny=8,dx=5e-6,dy=5e-6)
++            domain = MMGNLSEDomain(degrees_of_freedom(:time,:space),grid;
++                transverse_grid=xy)
++            initial = reshape(exp.(-(time_axis(grid)./0.4).^2),32,1,1) .*
++                reshape(exp.(-(xy.x./1e-5).^2),1,8,1) .*
++                reshape(exp.(-(xy.y./1e-5).^2),1,1,8) .* ComplexF64(1e6)
++            initial = reshape(initial,32,8,8,1)
++            parameters = FullFieldMMGNLSEParameters(domain;length=4e-4,
++                beta=TaylorBeta([5.8e6,0.,-0.02]),potential=zeros(8,8),
++                n2=2.3e-20,omega0=2pi*193.4,raman)
++            solution = solve_mmgnlse_full_field(initial,parameters,1e-4;
++                backend=:cuda,method=StrangSplit(),precision=:float64)
++            record_solution!(results,key,solution)
++        end
++    end
++end
++
++catch err
++    errors["testset"] = sprint(showerror,err)
++finally
++metadata = (;julia=string(VERSION),cuda=string(Base.pkgversion(CUDA)),
++    gpu=CUDA.name(CUDA.device()),source=pathof(PulsePropagation))
++JLD2.jldsave(ARGS[1];results,timings,errors,metadata)
++println("SAVED ",ARGS[1]," outputs=",length(results)," errors=",length(errors))
++end
++isempty(errors) || error("GPU audit cases failed; inspect the saved errors.")
+diff --git a/test/cuda_compatibility_fixtures.jl b/test/cuda_compatibility_fixtures.jl
+new file mode 100644
+index 0000000..a9879be
+--- /dev/null
++++ b/test/cuda_compatibility_fixtures.jl
+@@ -0,0 +1,33 @@
++# Small, deterministic physical inputs shared by the GPU regression checks.
++function cuda_compatibility_fixture(; nt=64, nm=3, np=1, rank=5,
++                                    raman=AnisotropicRaman(), cp=false,
++                                    length_m=4e-3, peak_power=2e3)
++    grid = TimeGrid(nt, 4.0)
++    dofs = np == 2 ? degrees_of_freedom(:time, :space, :polarization) :
++           nm > 1 ? degrees_of_freedom(:time, :space) :
++                    degrees_of_freedom(:time)
++    domain = MMGNLSEDomain(dofs, grid)
++    rng = MersenneTwister(312)
++    factor = 0.2 .+ rand(rng, nm, rank)
++    weights = fill(1e10 / rank, rank)
++    compressed = MMGNLSECPDecomposition(weights, ntuple(_ -> copy(factor), 4);
++        layout=:spatial, nmodes=nm, npolarizations=np, relative_error=0.0)
++    dense = zeros(nm, nm, nm, nm)
++    for i in 1:nm, j in 1:nm, k in 1:nm, l in 1:nm, r in 1:rank
++        dense[i,j,k,l] += weights[r]*factor[i,r]*factor[j,r]*factor[k,r]*factor[l,r]
++    end
++    beta = zeros(4, nm, np)
++    for m in 1:nm, p in 1:np
++        beta[:,m,p] .= (0.03*(m-1)+0.01*(p-1), 0.002*(m-1), -0.02, 1e-4)
++    end
++    parameters = MMGNLSEParameters(domain; length=length_m,
++        alpha=0.02, gain=0.01, beta=TaylorBeta(beta),
++        S=cp ? compressed : dense, n2=2.3e-20, omega0=2pi*193.4, raman)
++    initial = zeros(ComplexF64, nt, nm, np)
++    t = time_axis(grid)
++    for m in 1:nm, p in 1:np
++        initial[:,m,p] .= sqrt(peak_power/(nm*np)) .*
++            exp.(-((t .- 0.03*(m-1))./0.32).^2) .* exp.(0.17im.*t .+ 0.2im*m*p)
++    end
++    return parameters, initial
++end
+diff --git a/test/runtests.jl b/test/runtests.jl
+new file mode 100644
+index 0000000..ca9f101
+--- /dev/null
++++ b/test/runtests.jl
+@@ -0,0 +1,6 @@
++using Test
++using PulsePropagation
++
++@testset "PulsePropagation" begin
++    include("checkpointed_adjoint.jl")
++end

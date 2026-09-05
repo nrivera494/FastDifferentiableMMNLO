@@ -1,0 +1,691 @@
+Precompiling packages...
+    853.4 ms  ✓ UUIDs
+    852.1 ms  ✓ Logging
+    920.8 ms  ✓ OpenSSL_jll
+    874.9 ms  ✓ NetworkOptions
+    488.1 ms  ✓ MozillaCACerts_jll
+    567.8 ms  ✓ CompilerSupportLibraries_jll
+    585.9 ms  ✓ nghttp2_jll
+    531.7 ms  ✓ Unicode
+    521.1 ms  ✓ Zlib_jll
+    496.6 ms  ✓ LibSSH2_jll
+    594.7 ms  ✓ Base64
+   2065.2 ms  ✓ ArgTools
+    655.9 ms  ✓ p7zip_jll
+    670.8 ms  ✓ Printf
+    501.2 ms  ✓ LibGit2_jll
+    491.9 ms  ✓ LibCURL_jll
+    781.8 ms  ✓ Tar
+    786.7 ms  ✓ LibCURL
+   3151.8 ms  ✓ LibGit2
+   3807.2 ms  ✓ Dates
+   3086.9 ms  ✓ Downloads
+    604.9 ms  ✓ TOML
+   7231.5 ms  ✓ StyledStrings
+   2675.4 ms  ✓ JuliaSyntaxHighlighting
+   3938.8 ms  ✓ Markdown
+  45774.3 ms  ✓ Pkg
+  26 dependencies successfully precompiled in 61 seconds
+  Installing known registries into `/tmp/mmgnlse_compat_20260905/depot`
+       Added `General` registry to /tmp/mmgnlse_compat_20260905/depot/registries
+   Installed SciMLPublic ────────────────────── v1.3.0
+   Installed HypergeometricFunctions ────────── v0.3.30
+   Installed StatsFuns ──────────────────────── v2.2.1
+   Installed Accessors ──────────────────────── v0.1.45
+   Installed Preferences ────────────────────── v1.5.2
+   Installed OrdinaryDiffEqRosenbrock ───────── v2.7.0
+   Installed NonlinearSolve ─────────────────── v4.28.0
+   Installed SciMLLogging ───────────────────── v2.1.0
+   Installed FindFirstFunctions ─────────────── v3.2.1
+   Installed OrdinaryDiffEqSDIRK ────────────── v2.9.0
+   Installed PDMats ─────────────────────────── v0.11.41
+   Installed FFTW ───────────────────────────── v1.10.0
+   Installed TimerOutputs ───────────────────── v1.2.0
+   Installed SciMLJacobianOperators ─────────── v0.1.17
+   Installed ZipFile ────────────────────────── v0.10.1
+   Installed EnumX ──────────────────────────── v1.0.7
+   Installed DifferentialEquations ──────────── v8.1.0
+   Installed LoggingExtras ──────────────────── v1.2.0
+   Installed AMD ────────────────────────────── v0.5.3
+   Installed FileIO ─────────────────────────── v1.20.0
+   Installed Roots ──────────────────────────── v3.0.7
+   Installed FunctionWrappers ───────────────── v1.1.3
+   Installed ScopedValues ───────────────────── v1.6.2
+   Installed Statistics ─────────────────────── v1.11.1
+   Installed RecursiveArrayTools ────────────── v4.5.0
+   Installed MaybeInplace ───────────────────── v0.1.8
+   Installed DelimitedFiles ─────────────────── v1.9.1
+   Installed ZygoteRules ────────────────────── v0.2.8
+   Installed Missings ───────────────────────── v1.2.0
+   Installed Gamma ──────────────────────────── v1.2.0
+   Installed FiniteDiff ─────────────────────── v2.33.0
+   Installed RealDot ────────────────────────── v0.1.0
+   Installed IRTools ────────────────────────── v0.4.20
+   Installed OrdinaryDiffEqCore ─────────────── v4.15.0
+   Installed FastPower ──────────────────────── v1.5.0
+   Installed IntelOpenMP_jll ────────────────── v2025.2.0+0
+   Installed IrrationalConstants ────────────── v0.2.6
+   Installed OrdinaryDiffEqVerner ───────────── v2.4.0
+   Installed MuladdMacro ────────────────────── v0.2.7
+   Installed DiffEqBase ─────────────────────── v7.18.2
+   Installed JLD2 ───────────────────────────── v0.6.6
+   Installed PtrArrays ──────────────────────── v1.4.0
+   Installed ADTypes ────────────────────────── v1.24.0
+   Installed JSON ───────────────────────────── v1.7.1
+   Installed SpecialFunctions ───────────────── v2.9.0
+   Installed SciMLBase ──────────────────────── v3.49.2
+   Installed BracketingNonlinearSolve ───────── v1.12.5
+   Installed LineSearch ─────────────────────── v0.1.16
+   Installed OrdinaryDiffEqNonlinearSolve ───── v2.9.0
+   Installed ChunkCodecLibZstd ──────────────── v1.0.0
+   Installed Zygote ─────────────────────────── v0.7.12
+   Installed NonlinearSolveQuasiNewton ──────── v1.15.1
+   Installed NaNMath ────────────────────────── v1.1.4
+   Installed PureKLU ────────────────────────── v1.4.1
+   Installed SimpleNonlinearSolve ───────────── v2.14.0
+   Installed NonlinearSolveSpectralMethods ──── v1.8.0
+   Installed NLSolversBase ──────────────────── v8.0.1
+   Installed Rmath_jll ──────────────────────── v0.5.2+0
+   Installed PyPlot ─────────────────────────── v2.11.6
+   Installed RespecializeParams ─────────────── v1.3.0
+   Installed StaticArraysCore ───────────────── v1.4.4
+   Installed CommonSubexpressions ───────────── v0.3.1
+   Installed ExprTools ──────────────────────── v0.1.11
+   Installed StatsAPI ───────────────────────── v1.8.0
+   Installed DataStructures ─────────────────── v0.19.6
+   Installed SparseMatrixColorings ──────────── v0.4.27
+   Installed Colors ─────────────────────────── v0.13.1
+   Installed LinearSolve ────────────────────── v5.13.0
+   Installed ChainRules ─────────────────────── v1.73.0
+   Installed DiffRules ──────────────────────── v1.16.0
+   Installed FunctionWrappersWrappers ───────── v1.13.0
+   Installed LsqFit ─────────────────────────── v0.16.1
+   Installed StatsBase ──────────────────────── v0.34.12
+   Installed SciMLStructures ────────────────── v1.10.4
+   Installed Compat ─────────────────────────── v4.18.1
+   Installed TableTraits ────────────────────── v1.0.1
+   Installed DiffResults ────────────────────── v1.1.0
+   Installed ChunkCodecLibZlib ──────────────── v1.1.0
+   Installed ColorTypes ─────────────────────── v0.12.1
+   Installed oneTBB_jll ─────────────────────── v2022.3.0+0
+   Installed Zstd_jll ───────────────────────── v1.5.7+1
+   Installed PositiveFactorizations ─────────── v0.2.4
+   Installed Conda ──────────────────────────── v1.10.3
+   Installed PrettyTables ───────────────────── v3.4.8
+   Installed SciMLOperators ─────────────────── v1.29.0
+   Installed HashArrayMappedTries ───────────── v0.2.0
+   Installed Parsers ────────────────────────── v2.8.7
+   Installed Setfield ───────────────────────── v1.1.2
+   Installed PyCall ─────────────────────────── v1.96.4
+   Installed MKL_jll ────────────────────────── v2025.2.0+0
+   Installed NonlinearSolveBase ─────────────── v2.47.0
+   Installed AbstractFFTs ───────────────────── v1.5.0
+   Installed ConstructionBase ───────────────── v1.6.0
+   Installed DataValueInterfaces ────────────── v1.0.0
+   Installed OrderedCollections ─────────────── v2.0.1
+   Installed ChunkCodecCore ─────────────────── v1.0.2
+   Installed OrdinaryDiffEq ─────────────────── v7.7.0
+   Installed FastClosures ───────────────────── v0.3.2
+   Installed Reexport ───────────────────────── v1.2.2
+   Installed EnzymeCore ─────────────────────── v0.8.21
+   Installed JLLWrappers ────────────────────── v1.8.0
+   Installed LogExpFunctions ────────────────── v1.0.1
+   Installed ArrayInterface ─────────────────── v7.30.0
+   Installed NonlinearSolveFirstOrder ───────── v2.4.0
+   Installed AliasTables ────────────────────── v1.1.3
+   Installed LineSearches ───────────────────── v7.7.1
+   Installed PreallocationTools ─────────────── v1.6.0
+   Installed FFTW_jll ───────────────────────── v3.3.12+0
+   Installed OrdinaryDiffEqTsit5 ────────────── v2.1.3
+   Installed OpenSpecFun_jll ────────────────── v0.5.6+0
+   Installed CompositionsBase ───────────────── v0.1.2
+   Installed MacroTools ─────────────────────── v0.5.16
+   Installed ChainRulesCore ─────────────────── v1.26.1
+   Installed SparseInverseSubset ────────────── v0.1.3
+   Installed InverseFunctions ───────────────── v0.1.17
+   Installed GPUArraysCore ──────────────────── v0.2.0
+   Installed DocStringExtensions ────────────── v0.9.5
+   Installed Crayons ────────────────────────── v4.2.0
+   Installed Adapt ──────────────────────────── v4.7.0
+   Installed Krylov ─────────────────────────── v0.10.9
+   Installed DifferentiationInterface ───────── v0.7.21
+   Installed CommonSolve ────────────────────── v0.2.14
+   Installed Tables ─────────────────────────── v1.13.0
+   Installed Optim ──────────────────────────── v2.2.2
+   Installed DataAPI ────────────────────────── v1.16.0
+   Installed RecipesBase ────────────────────── v1.3.4
+   Installed FixedPointNumbers ──────────────── v0.8.6
+   Installed NPZ ────────────────────────────── v0.4.3
+   Installed Arpack_jll ─────────────────────── v3.5.2+0
+   Installed ConcreteStructs ────────────────── v0.2.8
+   Installed Rmath ──────────────────────────── v0.9.0
+   Installed OrdinaryDiffEqBDF ──────────────── v2.4.4
+   Installed RuntimeGeneratedFunctions ──────── v0.5.25
+   Installed TruncatedStacktraces ───────────── v1.4.0
+   Installed IteratorInterfaceExtensions ────── v1.0.0
+   Installed OrdinaryDiffEqDifferentiation ──── v3.10.0
+   Installed OrdinaryDiffEqRosenbrockTableaus ─ v2.4.1
+   Installed VersionParsing ─────────────────── v1.3.0
+   Installed BinaryHeaps ────────────────────── v1.1.0
+   Installed StructArrays ───────────────────── v0.7.3
+   Installed LaTeXStrings ───────────────────── v1.4.1
+   Installed FillArrays ─────────────────────── v1.17.0
+   Installed Arpack ─────────────────────────── v0.5.4
+   Installed ForwardDiff ────────────────────── v1.4.5
+   Installed SymbolicIndexingInterface ──────── v0.3.55
+   Installed PrecompileTools ────────────────── v1.3.4
+   Installed Requires ───────────────────────── v1.3.1
+   Installed SparseColumnPivotedQR ──────────── v2.1.7
+   Installed StringManipulation ─────────────── v0.5.0
+   Installed SortingAlgorithms ──────────────── v1.2.3
+   Installed StructUtils ────────────────────── v2.8.5
+   Installed Distributions ──────────────────── v0.25.131
+   Installed QuadGK ─────────────────────────── v2.11.3
+   Installed FastBroadcast ──────────────────── v1.4.0
+   Installed OrdinaryDiffEqDefault ──────────── v2.5.0
+   Installed LHLFactorization ───────────────── v2.2.0
+  Installing 5 artifacts
+   Installed artifact Rmath       121.8 KiB
+   Installed artifact OpenSpecFun 194.9 KiB
+   Installed artifact Zstd        646.0 KiB
+   Installed artifact Arpack      138.3 KiB
+   Installed artifact FFTW        2.2 MiB
+    Building Conda ─→ `/tmp/mmgnlse_compat_20260905/depot/scratchspaces/44cfe95a-1eb2-52ea-b672-e2afdf69b78f/8f06b0cfa4c514c7b9546756dbae91fcfbc92dc9/build.log`
+    Building PyCall → `/tmp/mmgnlse_compat_20260905/depot/scratchspaces/44cfe95a-1eb2-52ea-b672-e2afdf69b78f/9816a3826b0ebf49ab4926e2b18842ad8b5c8f04/build.log`
+Precompiling packages...
+    523.4 ms  ✓ JLLWrappers
+   1387.1 ms  ✓ CUDA_Driver_jll
+  2 dependencies successfully precompiled in 2 seconds. 5 already precompiled.
+    Updating registry at `/tmp/mmgnlse_compat_20260905/depot/registries/General.toml`
+   Resolving package versions...
+   Installed StaticArrays ─────────── v1.9.20
+   Installed cuFFT ────────────────── v6.3.1
+   Installed CUDATools ────────────── v6.3.1
+   Installed NVTX_jll ─────────────── v3.2.2+0
+   Installed LLVMLoopInfo ─────────── v1.0.0
+   Installed Tracy ────────────────── v0.1.6
+   Installed CUPTI ────────────────── v6.3.1
+   Installed cuSPARSE ─────────────── v6.3.1
+   Installed CEnum ────────────────── v0.5.0
+   Installed RandomNumbers ────────── v1.6.0
+   Installed BFloat16s ────────────── v0.6.1
+   Installed CUDA_Runtime_jll ─────── v0.24.4+2
+   Installed LibTracyClient_jll ───── v0.13.1+0
+   Installed cuRAND ───────────────── v6.3.1
+   Installed tree_sitter_ptx_jll ──── v0.1.0+0
+   Installed GPUArrays ────────────── v11.5.14
+   Installed tree_sitter_spirv_jll ── v0.1.0+0
+   Installed LLVM ─────────────────── v9.13.1
+   Installed demumble_jll ─────────── v1.3.0+0
+   Installed CUDA_Driver_jll ──────── v13.3.4+0
+   Installed cuSOLVER ─────────────── v6.3.1
+   Installed CUDACore ─────────────── v6.3.1
+   Installed CUDA_Runtime_Discovery ─ v2.1.1
+   Installed CUDA_Compiler_jll ────── v0.6.2+0
+   Installed LMDB_jll ─────────────── v1.0.0+0
+   Installed KernelAbstractions ───── v0.9.42
+   Installed NVML ─────────────────── v6.3.1
+   Installed Scratch ──────────────── v1.3.0
+   Installed LLVMExtra_jll ────────── v0.0.47+0
+   Installed NVTX ─────────────────── v1.0.3
+   Installed CompilerCaching ──────── v0.4.7
+   Installed UnsafeAtomics ────────── v0.3.2
+   Installed Random123 ────────────── v1.7.1
+   Installed tree_sitter_gcn_jll ──── v0.1.0+0
+   Installed NVPTX_LLVM_Backend_jll ─ v22.1.7+1
+   Installed GPUToolbox ───────────── v3.0.0
+   Installed JuliaNVTXCallbacks_jll ─ v0.2.1+0
+   Installed tree_sitter_llvm_jll ─── v1.1.0+0
+   Installed GPUCompiler ──────────── v2.5.2
+   Installed LMDB ─────────────────── v3.0.1
+   Installed Atomix ───────────────── v1.1.3
+   Installed cuBLAS ───────────────── v6.3.1
+   Installed CUDA ─────────────────── v6.3.1
+  Installing 14 artifacts
+   Installed artifact JuliaNVTXCallbacks 8.6 KiB
+   Installed artifact NVTX               13.7 KiB
+   Installed artifact tree_sitter_spirv  6.2 KiB
+   Installed artifact tree_sitter_gcn    13.1 KiB
+   Installed artifact demumble           322.0 KiB
+   Installed artifact LMDB               905.8 KiB
+   Installed artifact tree_sitter_ptx    23.1 KiB
+   Installed artifact LLVMExtra          3.2 MiB
+   Installed artifact tree_sitter_llvm   139.5 KiB
+   Installed artifact LibTracyClient     502.2 KiB
+   Installed artifact NVPTX_LLVM_Backend 24.5 MiB
+   Installed artifact CUDA_Driver        145.9 MiB
+   Installed artifact CUDA_Compiler      222.0 MiB
+   Installed artifact CUDA_Runtime       1013.8 MiB
+      Compat entries added for 
+    Updating `/tmp/mmgnlse_compat_20260905/main/Project.toml`
+  [052768ef] + CUDA v6.3.1
+    Updating `/tmp/mmgnlse_compat_20260905/main/Manifest.toml`
+  [a9b6321e] + Atomix v1.1.3
+  [ab4f0b2a] + BFloat16s v0.6.1
+  [fa961155] + CEnum v0.5.0
+  [052768ef] + CUDA v6.3.1
+  [bd0ed864] + CUDACore v6.3.1
+  [9ec180c6] + CUDATools v6.3.1
+  [1af6417a] + CUDA_Runtime_Discovery v2.1.1
+  [9e67e8f6] + CUPTI v6.3.1
+⌅ [9db33cc3] + CompilerCaching v0.4.7
+  [0c68f7d7] + GPUArrays v11.5.14
+  [61eb1bfa] + GPUCompiler v2.5.2
+  [096a3bc2] + GPUToolbox v3.0.0
+  [63c18a36] + KernelAbstractions v0.9.42
+  [929cbde3] + LLVM v9.13.1
+  [8b046642] + LLVMLoopInfo v1.0.0
+  [11f193de] + LMDB v3.0.1
+  [611af6d1] + NVML v6.3.1
+  [5da4648a] + NVTX v1.0.3
+  [74087812] + Random123 v1.7.1
+  [e6cf234a] + RandomNumbers v1.6.0
+  [6c6a2e73] + Scratch v1.3.0
+  [90137ffa] + StaticArrays v1.9.20
+  [e689c965] + Tracy v0.1.6
+  [013be700] + UnsafeAtomics v0.3.2
+  [182d3088] + cuBLAS v6.3.1
+  [533571aa] + cuFFT v6.3.1
+  [20fd9a0b] + cuRAND v6.3.1
+  [887afef0] + cuSOLVER v6.3.1
+  [b26da814] + cuSPARSE v6.3.1
+  [d1e2174e] + CUDA_Compiler_jll v0.6.2+0
+  [4ee394cb] + CUDA_Driver_jll v13.3.4+0
+  [76a88914] + CUDA_Runtime_jll v0.24.4+2
+  [9c1d0b0a] + JuliaNVTXCallbacks_jll v0.2.1+0
+  [dad2f222] + LLVMExtra_jll v0.0.47+0
+  [6206cf0b] + LMDB_jll v1.0.0+0
+  [ad6e5548] + LibTracyClient_jll v0.13.1+0
+  [ef6e0fe3] + NVPTX_LLVM_Backend_jll v22.1.7+1
+  [e98f9f5b] + NVTX_jll v3.2.2+0
+  [1e29f10c] + demumble_jll v1.3.0+0
+  [8b5cbfcf] + tree_sitter_gcn_jll v0.1.0+0
+  [44208993] + tree_sitter_llvm_jll v1.1.0+0
+  [71e3f6e6] + tree_sitter_ptx_jll v0.1.0+0
+  [f0e86581] + tree_sitter_spirv_jll v0.1.0+0
+        Info Packages marked with ⌅ have new versions available but compatibility constraints restrict them from upgrading. To see why use `status --outdated -m`
+Precompiling packages...
+    467.0 ms  ✓ LLVMLoopInfo
+    575.0 ms  ✓ PositiveFactorizations
+    667.8 ms  ✓ AbstractFFTs
+    518.7 ms  ✓ LaTeXStrings
+    551.7 ms  ✓ ExprTools
+    445.9 ms  ✓ IteratorInterfaceExtensions
+    519.0 ms  ✓ StatsAPI
+    461.1 ms  ✓ Future
+    571.6 ms  ✓ ChunkCodecCore
+   2248.1 ms  ✓ FunctionWrappers
+    803.5 ms  ✓ VersionParsing
+   2496.6 ms  ✓ UnsafeAtomics
+    806.8 ms  ✓ Serialization
+   1253.4 ms  ✓ FillArrays
+    495.6 ms  ✓ OpenLibm_jll
+   1563.2 ms  ✓ CEnum
+    414.6 ms  ✓ SuiteSparse_jll
+    579.0 ms  ✓ InverseFunctions
+    693.3 ms  ✓ Statistics
+    716.3 ms  ✓ RandomNumbers
+    669.8 ms  ✓ Requires
+    416.8 ms  ✓ DataValueInterfaces
+    369.8 ms  ✓ EnumX
+    329.4 ms  ✓ Reexport
+    458.3 ms  ✓ RealDot
+    494.2 ms  ✓ DocStringExtensions
+   2550.6 ms  ✓ MacroTools
+    421.0 ms  ✓ Mmap
+    406.2 ms  ✓ CompositionsBase
+    479.2 ms  ✓ PtrArrays
+    546.1 ms  ✓ HashArrayMappedTries
+   1937.8 ms  ✓ IrrationalConstants
+   3892.8 ms  ✓ SparseArrays
+   1287.7 ms  ✓ CUDA_Runtime_Discovery
+    561.5 ms  ✓ EnzymeCore
+    407.8 ms  ✓ Adapt
+    360.4 ms  ✓ DataAPI
+    356.7 ms  ✓ FastClosures
+   1471.0 ms  ✓ ConstructionBase
+    826.3 ms  ✓ OrdinaryDiffEqRosenbrockTableaus
+    546.1 ms  ✓ StaticArraysCore
+    470.5 ms  ✓ ZipFile
+   1838.1 ms  ✓ Crayons
+    384.4 ms  ✓ Scratch
+    486.3 ms  ✓ LoggingExtras
+   4558.0 ms  ✓ BFloat16s
+   3412.9 ms  ✓ Preferences
+   4520.9 ms  ✓ StructUtils
+   3876.7 ms  ✓ InteractiveUtils
+    551.6 ms  ✓ JLLWrappers
+    630.9 ms  ✓ ChunkCodecLibZlib
+    769.5 ms  ✓ LazyArtifacts
+    460.8 ms  ✓ Atomix
+   1432.7 ms  ✓ Compat
+    409.1 ms  ✓ InverseFunctions → InverseFunctionsDatesExt
+   1569.4 ms  ✓ NaNMath
+   1460.6 ms  ✓ OrderedCollections
+    418.5 ms  ✓ FillArrays → FillArraysStatisticsExt
+   2518.0 ms  ✓ Distributed
+   1048.0 ms  ✓ Random123
+    479.3 ms  ✓ CommonSubexpressions
+    436.8 ms  ✓ DelimitedFiles
+    372.4 ms  ✓ CompositionsBase → CompositionsBaseInverseFunctionsExt
+    380.3 ms  ✓ ScopedValues
+    438.7 ms  ✓ AliasTables
+   2597.5 ms  ✓ FixedPointNumbers
+    519.7 ms  ✓ LogExpFunctions
+    658.6 ms  ✓ AMD
+    710.7 ms  ✓ SuiteSparse
+    568.5 ms  ✓ FillArrays → FillArraysSparseArraysExt
+    483.5 ms  ✓ Adapt → AdaptSparseArraysExt
+    500.2 ms  ✓ Statistics → SparseArraysExt
+   3604.3 ms  ✓ FileIO
+    460.0 ms  ✓ GPUArraysCore
+    362.3 ms  ✓ EnzymeCore → AdaptExt
+    363.9 ms  ✓ ConstructionBase → ConstructionBaseLinearAlgebraExt
+   1310.6 ms  ✓ ArrayInterface
+    425.4 ms  ✓ DiffResults
+   1244.6 ms  ✓ Missings
+    335.6 ms  ✓ TableTraits
+    538.7 ms  ✓ PrecompileTools
+    368.0 ms  ✓ StructUtils → StructUtilsStaticArraysCoreExt
+    500.1 ms  ✓ TruncatedStacktraces
+   5401.5 ms  ✓ Krylov
+   2051.6 ms  ✓ IRTools
+    535.6 ms  ✓ tree_sitter_spirv_jll
+   3279.2 ms  ✓ Test
+    568.7 ms  ✓ NVTX_jll
+   1828.9 ms  ✓ CUDA_Driver_jll
+    544.2 ms  ✓ Rmath_jll
+    548.9 ms  ✓ LibTracyClient_jll
+    522.2 ms  ✓ tree_sitter_gcn_jll
+    522.0 ms  ✓ demumble_jll
+    571.5 ms  ✓ Zstd_jll
+    820.5 ms  ✓ Arpack_jll
+    697.8 ms  ✓ LMDB_jll
+    548.4 ms  ✓ NVPTX_LLVM_Backend_jll
+    665.5 ms  ✓ JuliaNVTXCallbacks_jll
+    539.1 ms  ✓ tree_sitter_llvm_jll
+    568.5 ms  ✓ FFTW_jll
+    548.6 ms  ✓ OpenSpecFun_jll
+    802.7 ms  ✓ tree_sitter_ptx_jll
+    893.2 ms  ✓ IntelOpenMP_jll
+    377.7 ms  ✓ Compat → CompatLinearAlgebraExt
+    969.1 ms  ✓ oneTBB_jll
+   1079.3 ms  ✓ LLVMExtra_jll
+    372.9 ms  ✓ LogExpFunctions → LogExpFunctionsInverseFunctionsExt
+   1351.1 ms  ✓ DataStructures
+    950.1 ms  ✓ Gamma
+   1892.2 ms  ✓ ColorTypes
+    709.6 ms  ✓ PDMats
+    506.2 ms  ✓ SparseInverseSubset
+    919.4 ms  ✓ Setfield
+   1192.5 ms  ✓ NPZ
+    510.7 ms  ✓ ArrayInterface → ArrayInterfaceSparseArraysExt
+    452.1 ms  ✓ ArrayInterface → ArrayInterfaceGPUArraysCoreExt
+    344.3 ms  ✓ ArrayInterface → ArrayInterfaceStaticArraysCoreExt
+    546.1 ms  ✓ ArrayInterface → ArrayInterfaceFillArraysExt
+   2408.2 ms  ✓ Accessors
+    764.7 ms  ✓ MuladdMacro
+   1514.9 ms  ✓ Tables
+   1243.9 ms  ✓ RecipesBase
+   1916.6 ms  ✓ ConcreteStructs
+   1137.9 ms  ✓ ADTypes
+   5813.2 ms  ✓ StaticArrays
+   4006.3 ms  ✓ CommonSolve
+   8663.3 ms  ✓ SparseColumnPivotedQR
+  22927.3 ms  ✓ REPL
+    717.0 ms  ✓ FastPower
+    489.0 ms  ✓ SciMLPublic
+   2675.8 ms  ✓ StringManipulation
+    838.0 ms  ✓ BinaryHeaps
+   2742.8 ms  ✓ FindFirstFunctions
+   2275.6 ms  ✓ RuntimeGeneratedFunctions
+    657.7 ms  ✓ SciMLLogging
+   2870.5 ms  ✓ MaybeInplace
+   7242.9 ms  ✓ Parsers
+  17556.3 ms  ✓ PureKLU
+   1028.1 ms  ✓ FastBroadcast
+    518.6 ms  ✓ InverseFunctions → InverseFunctionsTestExt
+   1358.7 ms  ✓ SciMLStructures
+    602.9 ms  ✓ Rmath
+    749.1 ms  ✓ Tracy
+    482.1 ms  ✓ ChunkCodecLibZstd
+    771.7 ms  ✓ Arpack
+   4229.4 ms  ✓ JSON
+   3164.4 ms  ✓ CUDA_Compiler_jll
+    834.2 ms  ✓ LMDB
+    726.6 ms  ✓ NVTX
+   2062.7 ms  ✓ SpecialFunctions
+   1825.9 ms  ✓ ChainRulesCore
+    452.2 ms  ✓ SortingAlgorithms
+   1475.6 ms  ✓ QuadGK
+   4377.6 ms  ✓ MKL_jll
+    893.4 ms  ✓ HypergeometricFunctions
+    410.3 ms  ✓ ColorTypes → StyledStringsExt
+    606.0 ms  ✓ FillArrays → FillArraysPDMatsExt
+    557.4 ms  ✓ FiniteDiff
+    436.1 ms  ✓ Accessors → LinearAlgebraExt
+    535.2 ms  ✓ Accessors → TestExt
+   3583.0 ms  ✓ Colors
+   6571.2 ms  ✓ LLVM
+  22980.3 ms  ✓ LHLFactorization
+    379.4 ms  ✓ StructUtils → StructUtilsTablesExt
+   1597.7 ms  ✓ StructArrays
+    367.4 ms  ✓ ADTypes → ADTypesEnzymeCoreExt
+    376.2 ms  ✓ ADTypes → ADTypesConstructionBaseExt
+    512.1 ms  ✓ StaticArrays → StaticArraysStatisticsExt
+    531.0 ms  ✓ FillArrays → FillArraysStaticArraysExt
+   1690.6 ms  ✓ DifferentiationInterface
+    492.1 ms  ✓ Adapt → AdaptStaticArraysExt
+    513.7 ms  ✓ ConstructionBase → ConstructionBaseStaticArraysExt
+    533.9 ms  ✓ Accessors → StaticArraysExt
+    557.0 ms  ✓ SparseColumnPivotedQR → SparseColumnPivotedQRAMDExt
+   1037.7 ms  ✓ PreallocationTools
+   1603.9 ms  ✓ FunctionWrappersWrappers
+    529.0 ms  ✓ MaybeInplace → MaybeInplaceSparseArraysExt
+   4353.3 ms  ✓ SparseMatrixColorings
+    598.3 ms  ✓ SciMLLogging → SciMLLoggingTracyExt
+   1119.3 ms  ✓ AbstractFFTs → AbstractFFTsTestExt
+    692.4 ms  ✓ Conda
+   4485.0 ms  ✓ Pkg → REPLExt
+    715.8 ms  ✓ CompilerCaching
+    643.2 ms  ✓ DiffRules
+   1358.7 ms  ✓ ChainRulesCore → ChainRulesCoreSparseArraysExt
+    904.2 ms  ✓ ZygoteRules
+   3878.1 ms  ✓ CUDA_Runtime_jll
+    420.9 ms  ✓ AbstractFFTs → AbstractFFTsChainRulesCoreExt
+    426.3 ms  ✓ EnzymeCore → EnzymeCoreChainRulesCoreExt
+    404.3 ms  ✓ ArrayInterface → ArrayInterfaceChainRulesCoreExt
+    407.5 ms  ✓ ADTypes → ADTypesChainRulesCoreExt
+   1121.3 ms  ✓ LogExpFunctions → LogExpFunctionsChainRulesCoreExt
+   1340.1 ms  ✓ StaticArrays → StaticArraysChainRulesCoreExt
+   1966.3 ms  ✓ SpecialFunctions → SpecialFunctionsChainRulesCoreExt
+   2572.6 ms  ✓ StatsBase
+   2751.6 ms  ✓ StatsFuns
+    531.2 ms  ✓ FiniteDiff → FiniteDiffSparseArraysExt
+  15362.6 ms  ✓ PrettyTables
+   5751.2 ms  ✓ FFTW
+    891.8 ms  ✓ FiniteDiff → FiniteDiffStaticArraysExt
+   1838.2 ms  ✓ SymbolicIndexingInterface
+    941.7 ms  ✓ NVTX → NVTXColorsExt
+   4120.2 ms  ✓ Roots
+   4143.1 ms  ✓ SciMLOperators
+   1343.1 ms  ✓ GPUToolbox
+   1027.4 ms  ✓ LLVM → BFloat16sExt
+    380.7 ms  ✓ StructArrays → StructArraysAdaptExt
+   1058.7 ms  ✓ LHLFactorization → LHLFactorizationSparseExt
+    535.6 ms  ✓ StructArrays → StructArraysSparseArraysExt
+   1456.5 ms  ✓ UnsafeAtomics → UnsafeAtomicsLLVM
+    420.2 ms  ✓ StructArrays → StructArraysLinearAlgebraExt
+    441.8 ms  ✓ Accessors → StructArraysExt
+    382.8 ms  ✓ DifferentiationInterface → DifferentiationInterfaceGPUArraysCoreExt
+    491.4 ms  ✓ DifferentiationInterface → DifferentiationInterfaceStaticArraysExt
+   1422.1 ms  ✓ StructArrays → StructArraysStaticArraysExt
+    405.8 ms  ✓ DifferentiationInterface → DifferentiationInterfaceChainRulesCoreExt
+    458.6 ms  ✓ DifferentiationInterface → DifferentiationInterfaceFiniteDiffExt
+  21348.3 ms  ✓ JLD2
+    393.5 ms  ✓ PreallocationTools → PreallocationToolsEnzymeCoreExt
+    555.5 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseArraysExt
+    669.4 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseMatrixColoringsExt
+    751.2 ms  ✓ SparseMatrixColorings → SparseMatrixColoringsColorsExt
+   1334.2 ms  ✓ RespecializeParams
+   3274.7 ms  ✓ KernelAbstractions
+    562.6 ms  ✓ PDMats → StatsBaseExt
+    419.5 ms  ✓ StatsFuns → StatsFunsInverseFunctionsExt
+   3476.1 ms  ✓ ForwardDiff
+   1086.0 ms  ✓ StatsFuns → StatsFunsChainRulesCoreExt
+    688.2 ms  ✓ SymbolicIndexingInterface → SymbolicIndexingInterfacePrettyTablesExt
+   3815.1 ms  ✓ TimerOutputs
+    453.8 ms  ✓ Roots → RootsChainRulesCoreExt
+   3851.9 ms  ✓ RecursiveArrayTools
+    617.0 ms  ✓ SciMLOperators → SciMLOperatorsSparseArraysExt
+  10560.8 ms  ✓ PyCall
+   2010.1 ms  ✓ NLSolversBase
+    783.9 ms  ✓ KernelAbstractions → SparseArraysExt
+    595.4 ms  ✓ KernelAbstractions → LinearAlgebraExt
+    634.5 ms  ✓ KernelAbstractions → EnzymeExt
+    646.4 ms  ✓ StructArrays → StructArraysGPUArraysCoreExt
+    581.8 ms  ✓ ForwardDiff → ForwardDiffStaticArraysExt
+    418.6 ms  ✓ FastPower → FastPowerForwardDiffExt
+    619.8 ms  ✓ PureKLU → PureKLUForwardDiffExt
+   5482.8 ms  ✓ ChainRules
+    927.6 ms  ✓ PreallocationTools → PreallocationToolsForwardDiffExt
+   1371.6 ms  ✓ DifferentiationInterface → DifferentiationInterfaceForwardDiffExt
+    489.7 ms  ✓ Roots → RootsForwardDiffExt
+    477.4 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsStatisticsExt
+   3794.3 ms  ✓ Distributions
+    470.6 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsFastBroadcastExt
+    516.4 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsStructArraysExt
+    652.5 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsSparseArraysExt
+    709.2 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsKernelAbstractionsExt
+    694.7 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsTablesExt
+    536.4 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsForwardDiffExt
+   1489.6 ms  ✓ LineSearches
+   5537.6 ms  ✓ PyPlot
+   1031.3 ms  ✓ ArrayInterface → ArrayInterfaceChainRulesExt
+  24339.2 ms  ✓ GPUCompiler
+   8188.6 ms  ✓ GPUArrays
+   1629.5 ms  ✓ Distributions → DistributionsTestExt
+   1678.5 ms  ✓ Distributions → DistributionsChainRulesCoreExt
+   2811.4 ms  ✓ LsqFit
+   2959.7 ms  ✓ Optim
+   1593.0 ms  ✓ GPUArrays → JLD2Ext
+   1774.1 ms  ✓ SparseMatrixColorings → SparseMatrixColoringsGPUArraysExt
+   9480.5 ms  ✓ SciMLBase
+    971.2 ms  ✓ SciMLBase → SciMLBaseStaticArraysExt
+   1224.6 ms  ✓ SciMLBase → SciMLBaseDistributionsExt
+    921.7 ms  ✓ SciMLBase → SciMLBaseChainRulesCoreExt
+   1071.9 ms  ✓ SciMLBase → SciMLBasePyCallExt
+    724.7 ms  ✓ SciMLBase → SciMLBaseDifferentiationInterfaceExt
+   1829.6 ms  ✓ SciMLBase → SciMLBaseForwardDiffExt
+   2363.8 ms  ✓ SciMLJacobianOperators
+  25410.3 ms  ✓ Zygote
+   5693.1 ms  ✓ LineSearch
+   1595.1 ms  ✓ Zygote → ZygoteColorsExt
+   1225.7 ms  ✓ DifferentiationInterface → DifferentiationInterfaceZygoteExt
+   1915.7 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsZygoteExt
+   6047.3 ms  ✓ NonlinearSolveBase
+    892.4 ms  ✓ LineSearch → LineSearchLineSearchesExt
+   1180.0 ms  ✓ NonlinearSolveBase → NonlinearSolveBaseSparseMatrixColoringsExt
+   2418.7 ms  ✓ SciMLBase → SciMLBaseZygoteExt
+   1117.6 ms  ✓ NonlinearSolveBase → NonlinearSolveBaseSparseArraysExt
+    937.2 ms  ✓ NonlinearSolveBase → NonlinearSolveBaseLineSearchExt
+   1015.2 ms  ✓ NonlinearSolveBase → NonlinearSolveBaseChainRulesCoreExt
+   4924.2 ms  ✓ NonlinearSolveBase → NonlinearSolveBaseForwardDiffExt
+  21413.7 ms  ✓ LinearSolve
+   2365.1 ms  ✓ BracketingNonlinearSolve
+   2229.6 ms  ✓ LinearSolve → LinearSolveKernelAbstractionsExt
+   5610.6 ms  ✓ LinearSolve → LinearSolveForwardDiffExt
+   6675.3 ms  ✓ LinearSolve → LinearSolveChainRulesCoreExt
+   3454.0 ms  ✓ LinearSolve → LinearSolveEnzymeExt
+  36391.7 ms  ✓ CUDACore
+   1052.9 ms  ✓ BracketingNonlinearSolve → BracketingNonlinearSolveForwardDiffExt
+   2347.8 ms  ✓ LinearSolve → LinearSolveArpackExt
+  11956.9 ms  ✓ NonlinearSolveSpectralMethods
+   2373.7 ms  ✓ NonlinearSolveBase → NonlinearSolveBaseLinearSolveExt
+   3311.0 ms  ✓ CUDACore → EnzymeCoreExt
+   3960.6 ms  ✓ DiffEqBase
+   3153.6 ms  ✓ CUDACore → ChainRulesCoreExt
+   3799.4 ms  ✓ CUDACore → SpecialFunctionsExt
+   3451.5 ms  ✓ cuFFT
+   4312.1 ms  ✓ cuRAND
+   5258.0 ms  ✓ NVML
+    977.5 ms  ✓ BracketingNonlinearSolve → BracketingNonlinearSolveChainRulesCoreExt
+   6030.9 ms  ✓ CUPTI
+   1004.4 ms  ✓ NonlinearSolveSpectralMethods → NonlinearSolveSpectralMethodsForwardDiffExt
+   5808.4 ms  ✓ cuSPARSE
+   5266.5 ms  ✓ SimpleNonlinearSolve
+    931.2 ms  ✓ DiffEqBase → DiffEqBaseChainRulesCoreExt
+   8201.9 ms  ✓ cuBLAS
+   1057.6 ms  ✓ DiffEqBase → DiffEqBaseSparseArraysExt
+   3130.9 ms  ✓ DiffEqBase → DiffEqBaseForwardDiffExt
+   3750.6 ms  ✓ OrdinaryDiffEqCore
+   1016.0 ms  ✓ SimpleNonlinearSolve → SimpleNonlinearSolveChainRulesCoreExt
+   3473.2 ms  ✓ cuBLAS → EnzymeCoreExt
+  15584.2 ms  ✓ NonlinearSolveQuasiNewton
+   1154.6 ms  ✓ OrdinaryDiffEqCore → OrdinaryDiffEqCoreSparseArraysExt
+  11561.2 ms  ✓ CUDATools
+   6586.7 ms  ✓ cuSOLVER
+   2934.6 ms  ✓ NonlinearSolveQuasiNewton → NonlinearSolveQuasiNewtonForwardDiffExt
+   5434.5 ms  ✓ OrdinaryDiffEqDifferentiation
+  27174.5 ms  ✓ NonlinearSolveFirstOrder
+  13108.3 ms  ✓ OrdinaryDiffEqTsit5
+   4873.8 ms  ✓ LinearSolve → LinearSolveCUDAExt
+   4668.5 ms  ✓ CUDA
+   2056.2 ms  ✓ OrdinaryDiffEqDifferentiation → OrdinaryDiffEqDifferentiationSparseArraysExt
+  20748.9 ms  ✓ OrdinaryDiffEqVerner
+   4981.6 ms  ✓ Atomix → AtomixCUDAExt
+   5468.2 ms  ? PulsePropagation → PulsePropagationCUDAExt
+   3935.4 ms  ✓ ArrayInterface → ArrayInterfaceCUDAExt
+   4246.1 ms  ✓ SparseMatrixColorings → SparseMatrixColoringsCUDAExt
+   4259.8 ms  ✓ RecursiveArrayTools → RecursiveArrayToolsCUDAExt
+   4640.8 ms  ✓ Zygote → ZygoteCUDAExt
+   4897.7 ms  ✓ DiffEqBase → DiffEqBaseCUDAExt
+  32584.1 ms  ✓ OrdinaryDiffEqRosenbrock
+  43460.1 ms  ✓ NonlinearSolve
+   5024.8 ms  ✓ OrdinaryDiffEqNonlinearSolve
+  27265.3 ms  ✓ OrdinaryDiffEqSDIRK
+  21827.6 ms  ✓ OrdinaryDiffEqBDF
+  56085.9 ms  ✓ OrdinaryDiffEqDefault
+   5447.5 ms  ✓ OrdinaryDiffEq
+  10074.4 ms  ✓ DifferentialEquations
+  342 dependencies successfully precompiled in 377 seconds. 26 already precompiled.
+  1 dependencies failed but may be precompilable after restarting julia
+  2 dependencies had output during precompilation:
+┌ LinearSolve
+│  Downloading artifact: MKL
+└  
+┌ MKL_jll
+│  Downloading artifact: IntelOpenMP
+│   Downloading artifact: oneTBB
+└  
+CUDA toolchain: 
+- runtime 13.3.0, artifact installation
+- driver 580.159.4 for 13.3
+- compiler 13.3.73, artifact installation
+
+CUDA libraries: 
+- cuBLAS: 13.6.0
+- cuSPARSE: 12.8.2
+- cuSOLVER: 12.2.6
+- cuFFT: 12.3.0
+- cuRAND: 10.4.3
+- CUPTI: 2026.2.1 (API 13.3.1)
+- NVML: 13.0.0+580.159.4
+
+Julia packages: 
+- CUDACore: 6.3.1
+- GPUArrays: 11.5.14
+- GPUCompiler: 2.5.2
+- KernelAbstractions: 0.9.42
+- CUDA_Driver_jll: 13.3.4+0
+- CUDA_Compiler_jll: 0.6.2+0
+- CUDA_Runtime_jll: 0.24.4+2
+- NVPTX_LLVM_Backend_jll: 22.1.7+1
+
+Toolchain:
+- Julia: 1.12.5
+- LLVM: 18.1.7
+
+1 device:
+  0: NVIDIA H100 80GB HBM3 (sm_90, 79.176 GiB / 79.647 GiB available)
+     compiles to sm_90a / PTX 9.3 (LLVM: sm_90a / PTX 9.0)

@@ -1,0 +1,15 @@
+┌ Warning: Module PulsePropagation with build ID ffffffff-ffff-ffff-46e9-076dfa989fc4 is missing from the cache.
+│ This may mean PulsePropagation [77e9f0e8-7a4a-4f35-9d99-5e12f5df8f42] does not support precompilation but is imported by a module that does.
+└ @ Base loading.jl:2641
+Precompiling packages...
+Info Given PulsePropagationCUDAExt was explicitly requested, output will be shown live [0K
+[0K┌ Warning: Module PulsePropagation with build ID ffffffff-ffff-ffff-46e9-076dfa989fc4 is missing from the cache.
+[0K│ This may mean PulsePropagation [77e9f0e8-7a4a-4f35-9d99-5e12f5df8f42] does not support precompilation but is imported by a module that does.
+[0K└ @ Base loading.jl:2641
+   5335.8 ms  ? PulsePropagation → PulsePropagationCUDAExt
+Test Summary:                            | Pass  Total     Time
+CUDA checkpointed discrete RK4IP adjoint |   17     17  1m54.8s
+Test Summary:                                         | Pass  Total   Time
+Multimode and polarization checkpointed CUDA adjoints |   30     30  57.3s
+Test Summary:                                            | Pass  Total  Time
+Checkpointed replay rejects mixed-precision forward maps |    2      2  6.6s

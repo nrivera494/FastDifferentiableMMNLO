@@ -1,0 +1,295 @@
+{
+  "branch": "codex/six-reproduction-examples",
+  "modified": {
+    ".DS_Store": {
+      "size": 24580,
+      "sha256": "81923b0da277290626d9cfa977bf3049c1964a8f2ea11d57e783f4a6c411702e"
+    },
+    "example_notebooks/.DS_Store": {
+      "size": 14340,
+      "sha256": "359d9e78ef69fe1de49a2149513a9799c7097ba5f59376d1280db73f07c254b5"
+    },
+    "example_notebooks/agent_generated_examples/01_wright2018_tutorial/wright2018_multimode_soliton.ipynb": {
+      "size": 441903,
+      "sha256": "54085ad3f7ac4291bbb2551fcb8c779ca42b45342e5213651139e63c119fb8e4"
+    },
+    "example_notebooks/agent_generated_examples/04_krupa2016_gpi/krupa2016_geometric_parametric_instability.ipynb": {
+      "size": 689041,
+      "sha256": "916cd1cb5065e6956e5a24bb24f3d922915dd71dd557f1aa6898f7f67c5beef9"
+    },
+    "example_notebooks/agent_generated_examples/05_liu2016_beam_cleaning/liu2016_beam_cleaning.ipynb": {
+      "size": 280624,
+      "sha256": "6c9e8a28748d1034bc33f4bad4430f76ade5c5294d723d73bcbcaeb7ce5b1273"
+    },
+    "example_notebooks/agent_generated_examples/06_corney2006_polarization_squeezing/corney2006_polarization_squeezing.ipynb": {
+      "size": 304694,
+      "sha256": "4b689140ab72d6cbb4b0d9cb3c0793720c7321309f36098a2666864a4ecc9dc3"
+    }
+  },
+  "untracked": {
+    "corney2006_polarization_squeezing_plan.md": {
+      "size": 8349,
+      "mtime_ns": 1788368916671851122
+    },
+    "cp_decomp/.DS_Store": {
+      "size": 8196,
+      "mtime_ns": 1788368916672063661
+    },
+    "cp_decomp/cp_decomp_080526.aux": {
+      "size": 5056,
+      "mtime_ns": 1788368916672214868
+    },
+    "cp_decomp/cp_decomp_080526.bbl": {
+      "size": 1402,
+      "mtime_ns": 1788368916672324117
+    },
+    "cp_decomp/cp_decomp_080526.blg": {
+      "size": 1540,
+      "mtime_ns": 1788368916672414325
+    },
+    "cp_decomp/cp_decomp_080526.end": {
+      "size": 1188,
+      "mtime_ns": 1788368916672517407
+    },
+    "cp_decomp/cp_decomp_080526.log": {
+      "size": 48087,
+      "mtime_ns": 1788368916672652656
+    },
+    "cp_decomp/cp_decomp_080526.out": {
+      "size": 2504,
+      "mtime_ns": 1788368916672811029
+    },
+    "cp_decomp/cp_decomp_080526.pdf": {
+      "size": 1689337,
+      "mtime_ns": 1788368916676371663
+    },
+    "cp_decomp/cp_decomp_080526.synctex.gz": {
+      "size": 129572,
+      "mtime_ns": 1788368916676729368
+    },
+    "cp_decomp/cp_decomp_080526.tex": {
+      "size": 59846,
+      "mtime_ns": 1788368916676997574
+    },
+    "cp_decomp/cp_decomp_080526Notes.bib": {
+      "size": 1438,
+      "mtime_ns": 1788368916677189656
+    },
+    "cp_decomp/cp_decomp_080526_marked.pdf": {
+      "size": 1696539,
+      "mtime_ns": 1788368916681778863
+    },
+    "cp_decomp/cp_decomposition.pptx": {
+      "size": 3186573,
+      "mtime_ns": 1788368916690521158
+    },
+    "cp_decomp/fastdiffmmnlogithub.aux": {
+      "size": 622,
+      "mtime_ns": 1788368916690788905
+    },
+    "cp_decomp/fastdiffmmnlogithub.log": {
+      "size": 44510,
+      "mtime_ns": 1788368916690960945
+    },
+    "cp_decomp/fastdiffmmnlogithub.out": {
+      "size": 675,
+      "mtime_ns": 1788368916691306650
+    },
+    "cp_decomp/fastdiffmmnlogithub.pdf": {
+      "size": 130725,
+      "mtime_ns": 1788368916691701980
+    },
+    "cp_decomp/fastdiffmmnlogithub.synctex.gz": {
+      "size": 19689,
+      "mtime_ns": 1788368916692012269
+    },
+    "cp_decomp/fastdiffmmnlogithub.tex": {
+      "size": 10107,
+      "mtime_ns": 1788368916692198684
+    },
+    "cp_decomp/fastdiffmmnlogithubNotes.bib": {
+      "size": 0,
+      "mtime_ns": 1788368916692223558
+    },
+    "cp_decomp/figure1_rank_timing_subpanels.pdf": {
+      "size": 40718,
+      "mtime_ns": 1788368916692476431
+    },
+    "cp_decomp/figure2_ff_cp_dense.pdf": {
+      "size": 59325,
+      "mtime_ns": 1788368916692687846
+    },
+    "cp_decomp/figure3_1035modes.pdf": {
+      "size": 8476121,
+      "mtime_ns": 1788368916707942455
+    },
+    "cp_decomp/figure3_1035modes.png": {
+      "size": 1014949,
+      "mtime_ns": 1788368916710373933
+    },
+    "cp_decomp/figures/soliton_jitter.png": {
+      "size": 26300,
+      "mtime_ns": 1788368916710616722
+    },
+    "cp_decomp/figures/soliton_jitter_with_legend.aux": {
+      "size": 32,
+      "mtime_ns": 1788368916710740263
+    },
+    "cp_decomp/figures/soliton_jitter_with_legend.log": {
+      "size": 17226,
+      "mtime_ns": 1788368916710852512
+    },
+    "cp_decomp/figures/soliton_jitter_with_legend.pdf": {
+      "size": 33282,
+      "mtime_ns": 1788368916711031468
+    },
+    "cp_decomp/figures/soliton_jitter_with_legend.png": {
+      "size": 39495,
+      "mtime_ns": 1788368916711215675
+    },
+    "cp_decomp/figures/soliton_jitter_with_legend.tex": {
+      "size": 1696,
+      "mtime_ns": 1788368916711335716
+    },
+    "cp_decomp/figures/squeezing_spectral_filter.png": {
+      "size": 209657,
+      "mtime_ns": 1788368916711795461
+    },
+    "cp_decomp/old_cp_manuscript/cp_decomp.aux": {
+      "size": 732,
+      "mtime_ns": 1788368916711959543
+    },
+    "cp_decomp/old_cp_manuscript/cp_decomp.log": {
+      "size": 42660,
+      "mtime_ns": 1788368916712102750
+    },
+    "cp_decomp/old_cp_manuscript/cp_decomp.out": {
+      "size": 358,
+      "mtime_ns": 1788368916712200124
+    },
+    "cp_decomp/old_cp_manuscript/cp_decomp.pdf": {
+      "size": 143026,
+      "mtime_ns": 1788368916712607995
+    },
+    "cp_decomp/old_cp_manuscript/cp_decomp.synctex.gz": {
+      "size": 29913,
+      "mtime_ns": 1788368916712751161
+    },
+    "cp_decomp/old_cp_manuscript/cp_decomp.tex": {
+      "size": 11408,
+      "mtime_ns": 1788368916712970200
+    },
+    "cp_decomp/preamble.log": {
+      "size": 1473,
+      "mtime_ns": 1788368916713063116
+    },
+    "cp_decomp/preamble.tex": {
+      "size": 10193,
+      "mtime_ns": 1788368916713216406
+    },
+    "cp_decomp/qnoise.bib": {
+      "size": 55677,
+      "mtime_ns": 1788368916713378822
+    },
+    "cp_decomp/screenshots_cp/.DS_Store": {
+      "size": 6148,
+      "mtime_ns": 1788368916713563487
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-03 at 8.56.41\u202fAM.png": {
+      "size": 276523,
+      "mtime_ns": 1788368916714241480
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-08 at 8.54.03\u202fAM.png": {
+      "size": 2317313,
+      "mtime_ns": 1788368916718010279
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-14 at 11.19.56\u202fAM.png": {
+      "size": 867325,
+      "mtime_ns": 1788368916719911303
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-14 at 11.20.01\u202fAM.png": {
+      "size": 802779,
+      "mtime_ns": 1788368916721648120
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-14 at 11.20.06\u202fAM.png": {
+      "size": 826361,
+      "mtime_ns": 1788368916723355855
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-14 at 11.20.25\u202fAM.png": {
+      "size": 808867,
+      "mtime_ns": 1788368916725050547
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-14 at 11.23.28\u202fAM.png": {
+      "size": 1012344,
+      "mtime_ns": 1788368916727299610
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-14 at 9.44.07\u202fAM.png": {
+      "size": 998599,
+      "mtime_ns": 1788368916729400382
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-18 at 4.20.09\u202fPM (2).png": {
+      "size": 1296445,
+      "mtime_ns": 1788368916731848943
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-18 at 4.22.17\u202fPM (2).png": {
+      "size": 1358037,
+      "mtime_ns": 1788368916734540085
+    },
+    "cp_decomp/screenshots_cp/Screenshot 2026-08-18 at 4.22.17\u202fPM.png": {
+      "size": 83976,
+      "mtime_ns": 1788368916734915790
+    },
+    "cp_decomp/screenshots_cp/vs_code_seneca_instructions.docx": {
+      "size": 19285,
+      "mtime_ns": 1788368916735079205
+    },
+    "cp_decomp/stochastic.pdf": {
+      "size": 323385,
+      "mtime_ns": 1788368916735356410
+    },
+    "cp_decomp/technical.tex": {
+      "size": 1468,
+      "mtime_ns": 1788368916735491618
+    },
+    "example_notebooks/agent_generated_examples/README.md": {
+      "size": 1720,
+      "mtime_ns": 1788368916740699111
+    },
+    "example_notebooks/benchmark_data/1035_mode_benchmark/Iwxy_cp_1035modes_0p001.npy": {
+      "size": 1179728,
+      "mtime_ns": 1788368916743303212
+    },
+    "example_notebooks/benchmark_data/1035_mode_benchmark/Iwxy_cp_1035modes_0p1.npy": {
+      "size": 1179728,
+      "mtime_ns": 1788368916745795731
+    },
+    "example_notebooks/benchmark_data/1035_mode_benchmark/Iwxy_cp_1035modes_initial.npy": {
+      "size": 1179728,
+      "mtime_ns": 1788368916748236167
+    },
+    "example_notebooks/benchmark_data/1035_mode_benchmark/spectral_fields_cp_1035modes_0p001.npy": {
+      "size": 135659600,
+      "mtime_ns": 1788368917047637030
+    },
+    "example_notebooks/benchmark_data/1035_mode_benchmark/spectral_fields_cp_1035modes_0p1.npy": {
+      "size": 135659600,
+      "mtime_ns": 1788368917358943199
+    },
+    "example_notebooks/benchmark_data/1035_mode_benchmark/wavelengths_1035modes.npy": {
+      "size": 65616,
+      "mtime_ns": 1788368917359941190
+    },
+    "example_notebooks/benchmark_data/1035_mode_benchmark/xvals_1035modes.npy": {
+      "size": 3152,
+      "mtime_ns": 1788368917360086480
+    },
+    "example_notebooks/benchmark_data/stochastic_soliton_jitter/ensemble.jld2": {
+      "size": 8448262144,
+      "mtime_ns": 1788368946644224683
+    },
+    "group_meeting_090326_computational_tools.pptx": {
+      "size": 6908355,
+      "mtime_ns": 1788369106134569198
+    }
+  }
+}

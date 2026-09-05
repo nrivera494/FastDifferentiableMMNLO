@@ -1,0 +1,546 @@
+┌ Warning: Module PulsePropagation with build ID ffffffff-ffff-ffff-7ea6-25a5bb784fef is missing from the cache.
+│ This may mean PulsePropagation [77e9f0e8-7a4a-4f35-9d99-5e12f5df8f42] does not support precompilation but is imported by a module that does.
+└ @ Base loading.jl:2641
+START kerr/scalar/float64/adaptivefalse
+PASS kerr/scalar/float64/adaptivefalse
+START kerr/scalar/float64/adaptivetrue
+PASS kerr/scalar/float64/adaptivetrue
+START kerr/scalar/mixed/adaptivefalse
+PASS kerr/scalar/mixed/adaptivefalse
+START kerr/scalar/mixed/adaptivetrue
+PASS kerr/scalar/mixed/adaptivetrue
+START kerr/scalar/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 3.081388230290741e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, NoRaman}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, NoRaman}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS kerr/scalar/continuous_adjoint
+START kerr/dense/float64/adaptivefalse
+PASS kerr/dense/float64/adaptivefalse
+START kerr/dense/float64/adaptivetrue
+PASS kerr/dense/float64/adaptivetrue
+START kerr/dense/mixed/adaptivefalse
+PASS kerr/dense/mixed/adaptivefalse
+START kerr/dense/mixed/adaptivetrue
+PASS kerr/dense/mixed/adaptivetrue
+START kerr/dense/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 8.880636279172904e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, NoRaman}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, NoRaman}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS kerr/dense/continuous_adjoint
+START kerr/cp_baseline/float64/adaptivefalse
+PASS kerr/cp_baseline/float64/adaptivefalse
+START kerr/cp_baseline/float64/adaptivetrue
+PASS kerr/cp_baseline/float64/adaptivetrue
+START kerr/cp_baseline/mixed/adaptivefalse
+PASS kerr/cp_baseline/mixed/adaptivefalse
+START kerr/cp_baseline/mixed/adaptivetrue
+PASS kerr/cp_baseline/mixed/adaptivetrue
+START kerr/cp_baseline/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 8.880636279198369e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, NoRaman}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, NoRaman}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS kerr/cp_baseline/continuous_adjoint
+START kerr/cp_optimized/float64/adaptivefalse
+PASS kerr/cp_optimized/float64/adaptivefalse
+START kerr/cp_optimized/float64/adaptivetrue
+PASS kerr/cp_optimized/float64/adaptivetrue
+START kerr/cp_optimized/mixed/adaptivefalse
+PASS kerr/cp_optimized/mixed/adaptivefalse
+START kerr/cp_optimized/mixed/adaptivetrue
+PASS kerr/cp_optimized/mixed/adaptivetrue
+START kerr/cp_optimized/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 8.880636279512114e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, NoRaman}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, NoRaman}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS kerr/cp_optimized/continuous_adjoint
+START kerr/polarized_dense/float64/adaptivefalse
+PASS kerr/polarized_dense/float64/adaptivefalse
+START kerr/polarized_dense/float64/adaptivetrue
+PASS kerr/polarized_dense/float64/adaptivetrue
+START kerr/polarized_dense/mixed/adaptivefalse
+PASS kerr/polarized_dense/mixed/adaptivefalse
+START kerr/polarized_dense/mixed/adaptivetrue
+PASS kerr/polarized_dense/mixed/adaptivetrue
+START kerr/polarized_dense/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 4.084219837759687e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, NoRaman}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, NoRaman}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS kerr/polarized_dense/continuous_adjoint
+START kerr/polarized_cp/float64/adaptivefalse
+PASS kerr/polarized_cp/float64/adaptivefalse
+START kerr/polarized_cp/float64/adaptivetrue
+PASS kerr/polarized_cp/float64/adaptivetrue
+START kerr/polarized_cp/mixed/adaptivefalse
+PASS kerr/polarized_cp/mixed/adaptivefalse
+START kerr/polarized_cp/mixed/adaptivetrue
+PASS kerr/polarized_cp/mixed/adaptivetrue
+START kerr/polarized_cp/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 4.084219837750565e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, NoRaman}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, NoRaman}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS kerr/polarized_cp/continuous_adjoint
+START agarwal/scalar/float64/adaptivefalse
+PASS agarwal/scalar/float64/adaptivefalse
+START agarwal/scalar/float64/adaptivetrue
+PASS agarwal/scalar/float64/adaptivetrue
+START agarwal/scalar/mixed/adaptivefalse
+PASS agarwal/scalar/mixed/adaptivefalse
+START agarwal/scalar/mixed/adaptivetrue
+PASS agarwal/scalar/mixed/adaptivetrue
+START agarwal/scalar/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 2.403333893672222e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AgarwalRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AgarwalRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS agarwal/scalar/continuous_adjoint
+START agarwal/dense/float64/adaptivefalse
+PASS agarwal/dense/float64/adaptivefalse
+START agarwal/dense/float64/adaptivetrue
+PASS agarwal/dense/float64/adaptivetrue
+START agarwal/dense/mixed/adaptivefalse
+PASS agarwal/dense/mixed/adaptivefalse
+START agarwal/dense/mixed/adaptivetrue
+PASS agarwal/dense/mixed/adaptivetrue
+START agarwal/dense/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 6.25039208812844e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AgarwalRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AgarwalRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS agarwal/dense/continuous_adjoint
+START agarwal/cp_baseline/float64/adaptivefalse
+PASS agarwal/cp_baseline/float64/adaptivefalse
+START agarwal/cp_baseline/float64/adaptivetrue
+PASS agarwal/cp_baseline/float64/adaptivetrue
+START agarwal/cp_baseline/mixed/adaptivefalse
+PASS agarwal/cp_baseline/mixed/adaptivefalse
+START agarwal/cp_baseline/mixed/adaptivetrue
+PASS agarwal/cp_baseline/mixed/adaptivetrue
+START agarwal/cp_baseline/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 6.250392088052826e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AgarwalRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AgarwalRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS agarwal/cp_baseline/continuous_adjoint
+START agarwal/cp_optimized/float64/adaptivefalse
+PASS agarwal/cp_optimized/float64/adaptivefalse
+START agarwal/cp_optimized/float64/adaptivetrue
+PASS agarwal/cp_optimized/float64/adaptivetrue
+START agarwal/cp_optimized/mixed/adaptivefalse
+PASS agarwal/cp_optimized/mixed/adaptivefalse
+START agarwal/cp_optimized/mixed/adaptivetrue
+PASS agarwal/cp_optimized/mixed/adaptivetrue
+START agarwal/cp_optimized/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 6.25039208813388e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AgarwalRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AgarwalRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS agarwal/cp_optimized/continuous_adjoint
+START agarwal/polarized_dense/float64/adaptivefalse
+PASS agarwal/polarized_dense/float64/adaptivefalse
+START agarwal/polarized_dense/float64/adaptivetrue
+PASS agarwal/polarized_dense/float64/adaptivetrue
+START agarwal/polarized_dense/mixed/adaptivefalse
+PASS agarwal/polarized_dense/mixed/adaptivefalse
+START agarwal/polarized_dense/mixed/adaptivetrue
+PASS agarwal/polarized_dense/mixed/adaptivetrue
+START agarwal/polarized_dense/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 2.834801821725185e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AgarwalRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AgarwalRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS agarwal/polarized_dense/continuous_adjoint
+START agarwal/polarized_cp/float64/adaptivefalse
+PASS agarwal/polarized_cp/float64/adaptivefalse
+START agarwal/polarized_cp/float64/adaptivetrue
+PASS agarwal/polarized_cp/float64/adaptivetrue
+START agarwal/polarized_cp/mixed/adaptivefalse
+PASS agarwal/polarized_cp/mixed/adaptivefalse
+START agarwal/polarized_cp/mixed/adaptivetrue
+PASS agarwal/polarized_cp/mixed/adaptivetrue
+START agarwal/polarized_cp/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 2.8348018216174553e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AgarwalRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AgarwalRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS agarwal/polarized_cp/continuous_adjoint
+START anisotropic/scalar/float64/adaptivefalse
+PASS anisotropic/scalar/float64/adaptivefalse
+START anisotropic/scalar/float64/adaptivetrue
+PASS anisotropic/scalar/float64/adaptivetrue
+START anisotropic/scalar/mixed/adaptivefalse
+PASS anisotropic/scalar/mixed/adaptivefalse
+START anisotropic/scalar/mixed/adaptivetrue
+PASS anisotropic/scalar/mixed/adaptivetrue
+START anisotropic/scalar/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 2.422866944351449e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AnisotropicRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AnisotropicRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS anisotropic/scalar/continuous_adjoint
+START anisotropic/dense/float64/adaptivefalse
+PASS anisotropic/dense/float64/adaptivefalse
+START anisotropic/dense/float64/adaptivetrue
+PASS anisotropic/dense/float64/adaptivetrue
+START anisotropic/dense/mixed/adaptivefalse
+PASS anisotropic/dense/mixed/adaptivefalse
+START anisotropic/dense/mixed/adaptivetrue
+PASS anisotropic/dense/mixed/adaptivetrue
+START anisotropic/dense/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 6.370704507965651e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AnisotropicRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AnisotropicRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS anisotropic/dense/continuous_adjoint
+START anisotropic/cp_baseline/float64/adaptivefalse
+PASS anisotropic/cp_baseline/float64/adaptivefalse
+START anisotropic/cp_baseline/float64/adaptivetrue
+PASS anisotropic/cp_baseline/float64/adaptivetrue
+START anisotropic/cp_baseline/mixed/adaptivefalse
+PASS anisotropic/cp_baseline/mixed/adaptivefalse
+START anisotropic/cp_baseline/mixed/adaptivetrue
+PASS anisotropic/cp_baseline/mixed/adaptivetrue
+START anisotropic/cp_baseline/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 6.370704508304903e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AnisotropicRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AnisotropicRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS anisotropic/cp_baseline/continuous_adjoint
+START anisotropic/cp_optimized/float64/adaptivefalse
+PASS anisotropic/cp_optimized/float64/adaptivefalse
+START anisotropic/cp_optimized/float64/adaptivetrue
+PASS anisotropic/cp_optimized/float64/adaptivetrue
+START anisotropic/cp_optimized/mixed/adaptivefalse
+PASS anisotropic/cp_optimized/mixed/adaptivefalse
+START anisotropic/cp_optimized/mixed/adaptivetrue
+PASS anisotropic/cp_optimized/mixed/adaptivetrue
+START anisotropic/cp_optimized/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 6.370704508287108e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AnisotropicRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AnisotropicRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS anisotropic/cp_optimized/continuous_adjoint
+START anisotropic/polarized_dense/float64/adaptivefalse
+PASS anisotropic/polarized_dense/float64/adaptivefalse
+START anisotropic/polarized_dense/float64/adaptivetrue
+PASS anisotropic/polarized_dense/float64/adaptivetrue
+START anisotropic/polarized_dense/mixed/adaptivefalse
+PASS anisotropic/polarized_dense/mixed/adaptivefalse
+START anisotropic/polarized_dense/mixed/adaptivetrue
+PASS anisotropic/polarized_dense/mixed/adaptivetrue
+START anisotropic/polarized_dense/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 2.868738710520975e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AnisotropicRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, SpatialOverlap{Float64}, Float64, Float64, AnisotropicRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS anisotropic/polarized_dense/continuous_adjoint
+START anisotropic/polarized_cp/float64/adaptivefalse
+PASS anisotropic/polarized_cp/float64/adaptivefalse
+START anisotropic/polarized_cp/float64/adaptivetrue
+PASS anisotropic/polarized_cp/float64/adaptivetrue
+START anisotropic/polarized_cp/mixed/adaptivefalse
+PASS anisotropic/polarized_cp/mixed/adaptivefalse
+START anisotropic/polarized_cp/mixed/adaptivetrue
+PASS anisotropic/polarized_cp/mixed/adaptivetrue
+START anisotropic/polarized_cp/continuous_adjoint
+Existing GPU notebook pathways: Test Failed at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+  Expression: norm(adjoint.fields - cpu_adjoint.fields) / norm(cpu_adjoint.fields) < 2.0e-8
+   Evaluated: 2.868738710510011e-8 < 2.0e-8
+
+Stacktrace:
+ [1] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ [2] (::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AnisotropicRaman{Float64}}})()
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:84
+ [3] audit_case(f::var"#16#17"{Symbol, Float64, Array{ComplexF64, 3}, MMGNLSEParameters{MMGNLSEDomain{TimeGrid{Float64}, Nothing}, Float64, Array{Float64, 4}, Array{Float64, 4}, TaylorBeta{Float64, 3}, MMGNLSECPDecomposition{Float64, Float64}, Float64, Float64, AnisotropicRaman{Float64}}}, key::String)
+   @ Main /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:34
+ [4] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:48
+ [5] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/julia-1.12.5/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [6] macro expansion
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:74 [inlined]
+PASS anisotropic/polarized_cp/continuous_adjoint
+START dense_contraction/gemm/polarizations1/float64
+PASS dense_contraction/gemm/polarizations1/float64
+START dense_contraction/gemm/polarizations1/mixed
+PASS dense_contraction/gemm/polarizations1/mixed
+START dense_contraction/symmetric_gemm/polarizations1/float64
+PASS dense_contraction/symmetric_gemm/polarizations1/float64
+START dense_contraction/symmetric_gemm/polarizations1/mixed
+PASS dense_contraction/symmetric_gemm/polarizations1/mixed
+START dense_contraction/gemm/polarizations2/float64
+PASS dense_contraction/gemm/polarizations2/float64
+START dense_contraction/gemm/polarizations2/mixed
+PASS dense_contraction/gemm/polarizations2/mixed
+START dense_contraction/symmetric_gemm/polarizations2/float64
+PASS dense_contraction/symmetric_gemm/polarizations2/float64
+START dense_contraction/symmetric_gemm/polarizations2/mixed
+PASS dense_contraction/symmetric_gemm/polarizations2/mixed
+START stochastic/cpfalse/float64
+PASS stochastic/cpfalse/float64
+START stochastic/cpfalse/mixed
+PASS stochastic/cpfalse/mixed
+START stochastic/cptrue/float64
+PASS stochastic/cptrue/float64
+START stochastic/cptrue/mixed
+PASS stochastic/cptrue/mixed
+START adaptive_rejections
+PASS adaptive_rejections
+START cp_tile_boundaries
+PASS cp_tile_boundaries
+START compression
+PASS compression
+START full_field/kerr
+PASS full_field/kerr
+START full_field/anisotropic
+PASS full_field/anisotropic
+Precompiling packages...
+Info Given PulsePropagationCUDAExt was explicitly requested, output will be shown live [0K
+[0K┌ Warning: Module PulsePropagation with build ID ffffffff-ffff-ffff-7ea6-25a5bb784fef is missing from the cache.
+[0K│ This may mean PulsePropagation [77e9f0e8-7a4a-4f35-9d99-5e12f5df8f42] does not support precompilation but is imported by a module that does.
+[0K└ @ Base loading.jl:2641
+   4938.8 ms  ? PulsePropagation → PulsePropagationCUDAExt
+ERROR: LoadError: GPU audit cases failed; inspect the saved errors.
+Stacktrace:
+ [1] error(s::String)
+   @ Base ./error.jl:44
+ [2] top-level scope
+   @ /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:174
+ [3] include(mod::Module, _path::String)
+   @ Base ./Base.jl:306
+ [4] exec_options(opts::Base.JLOptions)
+   @ Base ./client.jl:317
+ [5] _start()
+   @ Base ./client.jl:550
+in expression starting at /tmp/mmgnlse_compat_20260905/candidate/test/cuda_compatibility.jl:174
+Test Summary:                  | Pass  Fail  Total     Time
+Existing GPU notebook pathways |  188    18    206  3m13.4s
+RNG of the outermost testset: Xoshiro(0x3bb4b58c3151ff47, 0x28d46bbe407e0a1d, 0x8cd354677e4ea546, 0x639d1b44a4aa14ed, 0x2f9e5daceafbea77)
+SAVED /tmp/mmgnlse_compat_20260905/results/main_gpu.jld2 outputs=572 errors=1
