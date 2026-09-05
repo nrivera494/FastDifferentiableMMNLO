@@ -1773,6 +1773,319 @@ function _cuda_mmgnlse_convert_adjoint_units(
 end
 
 
+# -- Checkpointed discrete RK4IP adjoint -----------------------------------
+
+mutable struct CUDAMMGNLSEDiscreteAdjointWorkspace{A,N,F}
+    bar_midpoint::A
+    bar_k1::A
+    bar_k2::A
+    bar_k3::A
+    cotangent::A
+    nonlinear::N
+    forward::F
+end
+
+function _cuda_mmgnlse_discrete_adjoint_workspace(
+    prototype::CUDA.CuArray{ComplexF64,3},
+    cache::CUDAMMGNLSEForwardCache,
+)
+    nonlinear = if cache.overlap isa CUDAMMGNLSECP
+        _cuda_mmgnlse_cp_adjoint_workspace(prototype, cache.overlap)
+    elseif iszero(cache.raman.fraction)
+        _cuda_mmgnlse_dense_adjoint_workspace(prototype)
+    else
+        _cuda_mmgnlse_dense_raman_adjoint_workspace(
+            prototype, cache.overlap)
+    end
+    forward = nonlinear isa CUDAMMGNLSECPAdjointWorkspace ?
+              nonlinear.forward :
+              _cuda_mmgnlse_dense_forward_workspace(prototype, cache)
+    arrays = ntuple(_ -> similar(prototype), 5)
+    return CUDAMMGNLSEDiscreteAdjointWorkspace(
+        arrays..., nonlinear, forward)
+end
+
+function _cuda_mmgnlse_nonlinear_spectral_vjp!(
+    out,
+    field_w,
+    cotangent_w,
+    cache::CUDAMMGNLSEForwardCache,
+    workspace::CUDAMMGNLSEDiscreteAdjointWorkspace,
+)
+    if !cache.nonlinear_active
+        fill!(out, zero(eltype(out)))
+        return out
+    end
+    nonlinear = workspace.nonlinear
+    if nonlinear isa CUDAMMGNLSECPAdjointWorkspace
+        nonlinear.field_t .= field_w
+        nonlinear.fft_field! * nonlinear.field_t
+        if _cuda_mmgnlse_cp_is_optimized(cache.overlap)
+            # This is the same transform cancellation used by the continuous
+            # CUDA adjoint: fft(ifft(fft(cotangent_w))) leaves the spectral
+            # cotangent available for multiplication by conj(prefactor).
+            nonlinear.cubic_cotangent .=
+                cotangent_w .* conj.(cache.nonlinear_prefactor)
+            nonlinear.fft_cubic! * nonlinear.cubic_cotangent
+            _cuda_mmgnlse_cp_vjp_from_cubic!(
+                nonlinear.vjp_t, nonlinear.field_t,
+                nonlinear.cubic_cotangent, cache, nonlinear)
+        else
+            nonlinear.lambda_t .= cotangent_w
+            nonlinear.fft_lambda! * nonlinear.lambda_t
+            _cuda_mmgnlse_cp_vjp_nonlinear_baseline!(
+                nonlinear.vjp_t, nonlinear.field_t,
+                nonlinear.lambda_t, cache, nonlinear)
+        end
+        nonlinear.spectral_scratch .= nonlinear.vjp_t
+        nonlinear.ifft_vjp! * nonlinear.spectral_scratch
+        out .= nonlinear.spectral_scratch
+        return out
+    end
+
+    base = _cuda_mmgnlse_dense_adjoint_base(nonlinear)
+    base.field_t .= field_w
+    base.fft_field! * base.field_t
+    base.lambda_t .= cotangent_w
+    base.fft_lambda! * base.lambda_t
+    _cuda_mmgnlse_dense_vjp_nonlinear!(
+        base.vjp_t, base.field_t, base.lambda_t,
+        cache, nonlinear)
+    base.spectral_scratch .= base.vjp_t
+    base.ifft_vjp! * base.spectral_scratch
+    out .= base.spectral_scratch
+    return out
+end
+
+function _cuda_mmgnlse_discrete_forward_step!(
+    out,
+    field_w,
+    cache::CUDAMMGNLSEForwardCache,
+    workspace::CUDAMMGNLSEDiscreteAdjointWorkspace,
+    z0::Real,
+    z1::Real,
+)
+    if workspace.forward isa CUDAMMGNLSECPForwardWorkspace
+        return _cuda_mmgnlse_cp_rk4ip_step!(
+            out, field_w, cache, workspace.forward, z0, z1)
+    end
+    return _cuda_mmgnlse_dense_rk4ip_step!(
+        out, field_w, cache, workspace.forward, z0, z1)
+end
+
+function _cuda_mmgnlse_discrete_step_vjp!(
+    lambda_previous,
+    field_w,
+    lambda_next,
+    cache::CUDAMMGNLSEForwardCache,
+    workspace::CUDAMMGNLSEDiscreteAdjointWorkspace,
+    z0::Real,
+    z1::Real,
+)
+    state = _cuda_mmgnlse_forward_state_workspace(workspace.forward)
+    _cuda_mmgnlse_discrete_forward_step!(
+        state.next_field, field_w, cache, workspace, z0, z1)
+    if !cache.nonlinear_active
+        lambda_previous .=
+            conj.(state.from_midpoint .* state.to_midpoint) .* lambda_next
+        return lambda_previous
+    end
+
+    step = Float64(z1 - z0)
+    workspace.bar_midpoint .= conj.(state.from_midpoint) .* lambda_next
+    workspace.bar_k1 .= (step / 6) .* workspace.bar_midpoint
+    workspace.bar_k2 .= (step / 3) .* workspace.bar_midpoint
+    workspace.bar_k3 .= (step / 3) .* workspace.bar_midpoint
+
+    workspace.cotangent .= (step / 6) .* lambda_next
+    _cuda_mmgnlse_nonlinear_spectral_vjp!(
+        lambda_previous, state.stage, workspace.cotangent,
+        cache, workspace)
+    workspace.bar_midpoint .+=
+        conj.(state.from_midpoint) .* lambda_previous
+    workspace.bar_k3 .+=
+        step .* conj.(state.from_midpoint) .* lambda_previous
+
+    state.stage .= state.midpoint_base .+ (step / 2) .* state.k2
+    _cuda_mmgnlse_nonlinear_spectral_vjp!(
+        lambda_previous, state.stage, workspace.bar_k3,
+        cache, workspace)
+    workspace.bar_midpoint .+= lambda_previous
+    workspace.bar_k2 .+= (step / 2) .* lambda_previous
+
+    state.stage .= state.midpoint_base .+ (step / 2) .* state.k1
+    _cuda_mmgnlse_nonlinear_spectral_vjp!(
+        lambda_previous, state.stage, workspace.bar_k2,
+        cache, workspace)
+    workspace.bar_midpoint .+= lambda_previous
+    workspace.bar_k1 .+= (step / 2) .* lambda_previous
+
+    workspace.bar_k1 .*= conj.(state.to_midpoint)
+    _cuda_mmgnlse_nonlinear_spectral_vjp!(
+        lambda_previous, field_w, workspace.bar_k1,
+        cache, workspace)
+    lambda_previous .+=
+        conj.(state.to_midpoint) .* workspace.bar_midpoint
+    return lambda_previous
+end
+
+function _cuda_mmgnlse_store_discrete_adjoint!(
+    device_fields,
+    output_index::Integer,
+    lambda_w,
+    units::Symbol,
+    photon_scale_raw,
+)
+    lambda_t = fft(lambda_w, 1)
+    converted = _cuda_mmgnlse_convert_adjoint_units(
+        lambda_t, units, photon_scale_raw)
+    @views device_fields[:, :, :, output_index] .= converted
+    return device_fields
+end
+
+function _cuda_mmgnlse_solve_adjoint_checkpointed_discrete(
+    lambda_terminal,
+    parameters,
+    dz_adj;
+    forward_solution,
+    initial_field,
+    dz_forward,
+    units,
+    saveat,
+    checkpoint_stride,
+    cp_optimization,
+    backend,
+    synchronize,
+)
+    initial, integration_z, forward_step, source =
+        PulsePropagation._mmgnlse_discrete_forward_spec(
+            parameters, dz_adj;
+            forward_solution, initial_field, dz_forward)
+    checkpoint_indices, resolved_stride =
+        PulsePropagation._mmgnlse_checkpoint_indices(
+            length(integration_z), checkpoint_stride)
+    save_indices, saved_z =
+        PulsePropagation._mmgnlse_discrete_save_indices(
+            integration_z, saveat)
+    save_lookup = Dict(index => output for
+                       (output, index) in enumerate(save_indices))
+
+    cache = _cuda_mmgnlse_forward_cache(
+        parameters, cp_optimization;
+        dense_contraction=parameters.S isa
+                          PulsePropagation.MMGNLSECPDecomposition ?
+                          nothing : :custom)
+    initial_device = CUDA.CuArray(initial)
+    workspace = _cuda_mmgnlse_discrete_adjoint_workspace(
+        initial_device, cache)
+    state = _cuda_mmgnlse_forward_state_workspace(workspace.forward)
+    nt, nm, np = size(initial)
+    checkpoints = Array{ComplexF64,4}(
+        undef, nt, nm, np, length(checkpoint_indices))
+    field_w = ifft(initial_device, 1)
+    @views checkpoints[:, :, :, 1] .= Array(field_w)
+    checkpoint_cursor = 2
+    for step_index in 1:length(integration_z)-1
+        _cuda_mmgnlse_discrete_forward_step!(
+            state.next_field, field_w, cache, workspace,
+            integration_z[step_index], integration_z[step_index + 1])
+        field_w, state.next_field = state.next_field, field_w
+        if checkpoint_cursor <= length(checkpoint_indices) &&
+           step_index + 1 == checkpoint_indices[checkpoint_cursor]
+            @views checkpoints[:, :, :, checkpoint_cursor] .= Array(field_w)
+            checkpoint_cursor += 1
+        end
+    end
+    checkpoint_cursor == length(checkpoint_indices) + 1 || error(
+        "Not every CUDA forward checkpoint was stored.")
+
+    maximum_segment_steps = maximum(diff(checkpoint_indices))
+    segment_states = CUDA.zeros(
+        ComplexF64, nt, nm, np, maximum_segment_steps + 1)
+    replay = similar(initial_device)
+    lambda_w = CUDA.CuArray(ifftshift(
+        PulsePropagation._mmgnlse_validate_adjoint_terminal(
+            lambda_terminal, parameters), 1))
+    lambda_previous = similar(lambda_w)
+    device_fields = CUDA.zeros(
+        ComplexF64, nt, nm, np, length(saved_z))
+    photon_scale_raw = if units === :photon
+        centered_weights =
+            PulsePropagation._mmgnlse_photon_weights(parameters)
+        centered_scale = map(centered_weights) do weight
+            weight > 0 ? inv(sqrt(weight)) : 0.0
+        end
+        CUDA.CuArray(ifftshift(centered_scale, 1))
+    else
+        CUDA.zeros(Float64, 0)
+    end
+    if haskey(save_lookup, length(integration_z))
+        _cuda_mmgnlse_store_discrete_adjoint!(
+            device_fields, save_lookup[length(integration_z)],
+            lambda_w, units, photon_scale_raw)
+    end
+
+    for segment_index in length(checkpoint_indices)-1:-1:1
+        first_state = checkpoint_indices[segment_index]
+        last_state = checkpoint_indices[segment_index + 1]
+        segment_steps = last_state - first_state
+        copyto!(replay, Array(@view(checkpoints[:, :, :, segment_index])))
+        @views segment_states[:, :, :, 1] .= replay
+        for local_step in 1:segment_steps
+            global_step = first_state + local_step - 1
+            _cuda_mmgnlse_discrete_forward_step!(
+                state.next_field, replay, cache, workspace,
+                integration_z[global_step],
+                integration_z[global_step + 1])
+            replay, state.next_field = state.next_field, replay
+            @views segment_states[:, :, :, local_step + 1] .= replay
+        end
+        for local_step in segment_steps:-1:1
+            global_step = first_state + local_step - 1
+            _cuda_mmgnlse_discrete_step_vjp!(
+                lambda_previous,
+                @view(segment_states[:, :, :, local_step]),
+                lambda_w, cache, workspace,
+                integration_z[global_step],
+                integration_z[global_step + 1])
+            lambda_w, lambda_previous = lambda_previous, lambda_w
+            if haskey(save_lookup, global_step)
+                _cuda_mmgnlse_store_discrete_adjoint!(
+                    device_fields, save_lookup[global_step],
+                    lambda_w, units, photon_scale_raw)
+            end
+        end
+    end
+
+    synchronize && CUDA.synchronize()
+    checkpoint_bytes = sizeof(ComplexF64) * length(checkpoints)
+    replay_bytes = sizeof(ComplexF64) * length(segment_states)
+    host_cache = (
+        backend,
+        adjoint_mode=:discrete_rk4ip,
+        forward_solution=source,
+        integration_z=Float64.(integration_z),
+        forward_step,
+        checkpoint_stride=resolved_stride,
+        checkpoint_z=Float64.(integration_z[checkpoint_indices]),
+        checkpoint_count=length(checkpoint_indices),
+        checkpoint_bytes,
+        replay_peak_planes=maximum_segment_steps + 1,
+        replay_bytes,
+        frame=:spectral,
+        core=PulsePropagation._mmgnlse_solver_cache(parameters),
+        device=string(CUDA.device()),
+    )
+    return PulsePropagation.MMGNLSEAdjointSolution(
+        z=saved_z,
+        fields=Array(device_fields),
+        parameters=parameters,
+        units=units,
+        cache=host_cache,
+    )
+end
+
+
 # -- Public CUDA adjoint backend -------------------------------------------
 
 function PulsePropagation._mmgnlse_solve_adjoint_cuda(
@@ -1788,6 +2101,8 @@ function PulsePropagation._mmgnlse_solve_adjoint_cuda(
     device=nothing,
     synchronize::Bool=true,
     backend::Symbol=:cuda,
+    adjoint_mode::Symbol=:continuous,
+    checkpoint_stride=:auto,
 )
     CUDA.functional() || error(
         "CUDA.jl is available but no functional CUDA device was found.")
@@ -1797,10 +2112,18 @@ function PulsePropagation._mmgnlse_solve_adjoint_cuda(
             "Supply exactly one of forward_solution or initial_field."))
     isfinite(dz_adj) && dz_adj > 0 || throw(ArgumentError(
         "dz_adj must be finite and positive."))
-    PulsePropagation._mmgnlse_validate_adjoint_method(method)
     units in (:power, :photon) || throw(ArgumentError(
         "units must be :power or :photon."))
     cp_optimization = _cuda_mmgnlse_cp_optimization(backend)
+    selected_adjoint_mode =
+        PulsePropagation._mmgnlse_validate_adjoint_mode(adjoint_mode)
+    if selected_adjoint_mode === :discrete_rk4ip
+        return _cuda_mmgnlse_solve_adjoint_checkpointed_discrete(
+            lambda_terminal, parameters, dz_adj;
+            forward_solution, initial_field, dz_forward, units, saveat,
+            checkpoint_stride, cp_optimization, backend, synchronize)
+    end
+    PulsePropagation._mmgnlse_validate_adjoint_method(method)
 
     device_forward, host_forward = _cuda_mmgnlse_prepare_forward(
         parameters;

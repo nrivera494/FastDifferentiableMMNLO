@@ -267,6 +267,14 @@ function _mmgnlse_validate_adjoint_method(method)
     return method
 end
 
+function _mmgnlse_validate_adjoint_mode(mode)
+    selected = mode isa Symbol ? mode : Symbol(mode)
+    selected in (:continuous, :discrete_rk4ip) || throw(ArgumentError(
+        "adjoint_mode must be :continuous or :discrete_rk4ip; got " *
+        "$(repr(selected))."))
+    return selected
+end
+
 function _mmgnlse_photon_weights(parameters::MMGNLSEParameters)
     has_dof(parameters.domain.dofs, :time) || throw(ArgumentError(
         "Photon normalization requires the :time degree of freedom."))
@@ -291,12 +299,344 @@ function _mmgnlse_convert_adjoint_units(field_t, parameters, units::Symbol)
     return fft(ifftshift(lambda_w, 1), 1)
 end
 
+function _mmgnlse_resolve_checkpoint_stride(checkpoint_stride,
+                                             nsteps::Integer)
+    nsteps > 0 || throw(ArgumentError(
+        "A checkpointed adjoint requires at least one forward step."))
+    stride = if checkpoint_stride === :auto
+        min(Int(nsteps), 256)
+    elseif checkpoint_stride isa Integer
+        Int(checkpoint_stride)
+    else
+        throw(ArgumentError(
+            "checkpoint_stride must be :auto or a positive integer."))
+    end
+    stride > 0 || throw(ArgumentError(
+        "checkpoint_stride must be positive."))
+    return min(stride, Int(nsteps))
+end
+
+function _mmgnlse_checkpoint_indices(npoints::Integer,
+                                      checkpoint_stride)
+    npoints >= 2 || throw(ArgumentError(
+        "A checkpointed trajectory requires at least two grid points."))
+    stride = _mmgnlse_resolve_checkpoint_stride(
+        checkpoint_stride, npoints - 1)
+    indices = collect(1:stride:Int(npoints))
+    last(indices) == npoints || push!(indices, Int(npoints))
+    return indices, stride
+end
+
+function _mmgnlse_discrete_save_indices(integration_z::AbstractVector,
+                                         saveat)
+    if saveat === :steps
+        indices = collect(eachindex(integration_z))
+        return indices, Float64.(integration_z)
+    end
+    targets, _ = _mmgnlse_save_targets(
+        Float64(last(integration_z)), saveat)
+    scale = max(1.0, abs(first(integration_z)), abs(last(integration_z)))
+    tolerance = 128eps(Float64) * scale
+    indices = Vector{Int}(undef, length(targets))
+    for (target_index, target) in enumerate(targets)
+        right = searchsortedfirst(integration_z, target)
+        candidates = if right <= firstindex(integration_z)
+            (firstindex(integration_z),)
+        elseif right > lastindex(integration_z)
+            (lastindex(integration_z),)
+        else
+            (right - 1, right)
+        end
+        distances = map(index -> abs(integration_z[index] - target),
+                        candidates)
+        selected = candidates[argmin(distances)]
+        distances[argmin(distances)] <= tolerance || throw(ArgumentError(
+            "The discrete RK4IP adjoint can save only at forward step " *
+            "coordinates. Requested z=$target is not on the forward grid."))
+        indices[target_index] = selected
+    end
+    return indices, Float64.(integration_z[indices])
+end
+
+function _mmgnlse_discrete_forward_spec(
+    parameters::MMGNLSEParameters,
+    dz_adj::Real;
+    forward_solution,
+    initial_field,
+    dz_forward,
+)
+    (forward_solution === nothing) ⊻ (initial_field === nothing) ||
+        throw(ArgumentError(
+            "Supply exactly one of forward_solution or initial_field."))
+    isfinite(dz_adj) && dz_adj > 0 || throw(ArgumentError(
+        "dz_adj must be finite and positive."))
+
+    source = forward_solution
+    if forward_solution !== nothing
+        forward_solution isa MMGNLSESolution || throw(ArgumentError(
+            "forward_solution must be an MMGNLSESolution."))
+        forward_solution.parameters === parameters || throw(ArgumentError(
+            "forward_solution was constructed with a different " *
+            "MMGNLSEParameters object."))
+        dz_forward === nothing || throw(ArgumentError(
+            "dz_forward is only valid when initial_field is supplied."))
+        forward_solution.method isa RK4IP || throw(ArgumentError(
+            "adjoint_mode=:discrete_rk4ip requires an RK4IP forward solution."))
+        if forward_solution.cache !== nothing &&
+           hasproperty(forward_solution.cache, :adaptive) &&
+           getproperty(forward_solution.cache, :adaptive)
+            throw(ArgumentError(
+                "adjoint_mode=:discrete_rk4ip currently requires a " *
+                "fixed-step forward solution."))
+        end
+        if forward_solution.cache !== nothing &&
+           hasproperty(forward_solution.cache, :precision) &&
+           getproperty(forward_solution.cache, :precision) !== :float64
+            throw(ArgumentError(
+                "adjoint_mode=:discrete_rk4ip replays in Float64; " *
+                "rerun the forward solve with precision=:float64."))
+        end
+        step = Float64(forward_solution.dz)
+        initial = _mmgnlse_validate_initial_field(
+            forward_solution.initial_field, parameters)
+        cached_grid = _mmgnlse_cache_integration_z(forward_solution)
+        if cached_grid === nothing
+            targets, every_step = _mmgnlse_save_targets(
+                Float64(parameters.length), nothing)
+            integration_z, _ = _mmgnlse_step_grid(
+                Float64(parameters.length), step, targets, every_step)
+        else
+            integration_z = Float64.(cached_grid)
+        end
+    else
+        dz_forward === nothing && throw(ArgumentError(
+            "dz_forward is required when initial_field is supplied."))
+        isfinite(dz_forward) && dz_forward > 0 || throw(ArgumentError(
+            "dz_forward must be finite and positive."))
+        step = Float64(dz_forward)
+        initial = _mmgnlse_validate_initial_field(initial_field, parameters)
+        targets, every_step = _mmgnlse_save_targets(
+            Float64(parameters.length), nothing)
+        integration_z, _ = _mmgnlse_step_grid(
+            Float64(parameters.length), step, targets, every_step)
+    end
+
+    tolerance = 128eps(Float64) * max(1.0, abs(step), abs(float(dz_adj)))
+    abs(Float64(dz_adj) - step) <= tolerance || throw(ArgumentError(
+        "For adjoint_mode=:discrete_rk4ip, dz_adj must equal the nominal " *
+        "forward step ($step); got $(Float64(dz_adj))."))
+    first(integration_z) == 0 || throw(ArgumentError(
+        "The forward integration grid must begin at z=0."))
+    last(integration_z) == parameters.length || throw(ArgumentError(
+        "The forward integration grid must end at parameters.length."))
+    all(diff(integration_z) .> 0) || throw(ArgumentError(
+        "The forward integration grid must be strictly increasing."))
+    return initial, integration_z, step, source
+end
+
+"""Pull a cotangent through the nonlinear spectral RHS alone."""
+function _mmgnlse_nonlinear_spectral_vjp(
+    field_w,
+    cotangent_w,
+    parameters::MMGNLSEParameters,
+    cache,
+)
+    !cache.nonlinear_active && return zeros(ComplexF64, size(field_w))
+    field_t = fft(field_w, 1)
+    cotangent_t = fft(cotangent_w, 1)
+    return ifft(
+        _mmgnlse_vjp_nonlinear(
+            field_t, cotangent_t, parameters, cache),
+        1,
+    )
+end
+
+"""
+Pull a cotangent through one fixed-step RK4IP update.
+
+The stage nonlinearities delegate to `_mmgnlse_vjp_nonlinear`, so the Kerr,
+isotropic Raman, and anisotropic Raman conventions are identical to the
+continuous adjoint. Only the Runge--Kutta composition is differentiated here.
+"""
+function _mmgnlse_rk4ip_step_vjp(
+    field_w,
+    lambda_next,
+    parameters::MMGNLSEParameters,
+    z0::Real,
+    z1::Real,
+    cache,
+)
+    to_midpoint = _mmgnlse_linear_propagator(
+        parameters, z0, (z0 + z1) / 2, cache)
+    from_midpoint = _mmgnlse_linear_propagator(
+        parameters, (z0 + z1) / 2, z1, cache)
+    if !cache.nonlinear_active
+        return conj.(from_midpoint .* to_midpoint) .* lambda_next
+    end
+
+    step = z1 - z0
+    midpoint_base = to_midpoint .* field_w
+    k1 = to_midpoint .* _mmgnlse_nonlinear_spectral(
+        field_w, parameters, cache)
+    stage2 = midpoint_base .+ (step / 2) .* k1
+    k2 = _mmgnlse_nonlinear_spectral(stage2, parameters, cache)
+    stage3 = midpoint_base .+ (step / 2) .* k2
+    k3 = _mmgnlse_nonlinear_spectral(stage3, parameters, cache)
+    stage4 = from_midpoint .* (midpoint_base .+ step .* k3)
+
+    propagated = conj.(from_midpoint) .* lambda_next
+    bar_midpoint = copy(propagated)
+    bar_k1 = (step / 6) .* propagated
+    bar_k2 = (step / 3) .* propagated
+    bar_k3 = (step / 3) .* propagated
+
+    bar_stage = _mmgnlse_nonlinear_spectral_vjp(
+        stage4, (step / 6) .* lambda_next, parameters, cache)
+    bar_midpoint .+= conj.(from_midpoint) .* bar_stage
+    bar_k3 .+= step .* conj.(from_midpoint) .* bar_stage
+
+    bar_stage = _mmgnlse_nonlinear_spectral_vjp(
+        stage3, bar_k3, parameters, cache)
+    bar_midpoint .+= bar_stage
+    bar_k2 .+= (step / 2) .* bar_stage
+
+    bar_stage = _mmgnlse_nonlinear_spectral_vjp(
+        stage2, bar_k2, parameters, cache)
+    bar_midpoint .+= bar_stage
+    bar_k1 .+= (step / 2) .* bar_stage
+
+    lambda_previous = _mmgnlse_nonlinear_spectral_vjp(
+        field_w, conj.(to_midpoint) .* bar_k1, parameters, cache)
+    lambda_previous .+= conj.(to_midpoint) .* bar_midpoint
+    return lambda_previous
+end
+
+function _mmgnlse_store_discrete_adjoint!(
+    fields,
+    output_index::Integer,
+    lambda_w,
+    parameters,
+    units,
+)
+    lambda_t = fft(lambda_w, 1)
+    @views fields[:, :, :, output_index] .=
+        _mmgnlse_convert_adjoint_units(lambda_t, parameters, units)
+    return fields
+end
+
+function _mmgnlse_solve_adjoint_discrete_cpu(
+    lambda_terminal,
+    parameters::MMGNLSEParameters,
+    dz_adj::Real;
+    forward_solution,
+    initial_field,
+    dz_forward,
+    units::Symbol,
+    saveat,
+    checkpoint_stride,
+)
+    initial, integration_z, forward_step, source =
+        _mmgnlse_discrete_forward_spec(
+            parameters, dz_adj;
+            forward_solution, initial_field, dz_forward)
+    checkpoint_indices, resolved_stride = _mmgnlse_checkpoint_indices(
+        length(integration_z), checkpoint_stride)
+    save_indices, saved_z = _mmgnlse_discrete_save_indices(
+        integration_z, saveat)
+    save_lookup = Dict(index => output for
+                       (output, index) in enumerate(save_indices))
+
+    cache = _mmgnlse_solver_cache(parameters)
+    nt, nm, np = size(initial)
+    checkpoints = Array{ComplexF64,4}(
+        undef, nt, nm, np, length(checkpoint_indices))
+    field_w = ifft(initial, 1)
+    @views checkpoints[:, :, :, 1] .= field_w
+    checkpoint_cursor = 2
+    for step_index in 1:length(integration_z)-1
+        field_w = _mmgnlse_rk4ip_step(
+            field_w, parameters,
+            integration_z[step_index], integration_z[step_index + 1], cache)
+        if checkpoint_cursor <= length(checkpoint_indices) &&
+           step_index + 1 == checkpoint_indices[checkpoint_cursor]
+            @views checkpoints[:, :, :, checkpoint_cursor] .= field_w
+            checkpoint_cursor += 1
+        end
+    end
+    checkpoint_cursor == length(checkpoint_indices) + 1 || error(
+        "Not every forward checkpoint was stored.")
+
+    maximum_segment_steps = maximum(diff(checkpoint_indices))
+    segment_states = Array{ComplexF64,4}(
+        undef, nt, nm, np, maximum_segment_steps + 1)
+    lambda_w = ifftshift(
+        _mmgnlse_validate_adjoint_terminal(lambda_terminal, parameters), 1)
+    fields = Array{ComplexF64,4}(
+        undef, nt, nm, np, length(saved_z))
+    if haskey(save_lookup, length(integration_z))
+        _mmgnlse_store_discrete_adjoint!(
+            fields, save_lookup[length(integration_z)], lambda_w,
+            parameters, units)
+    end
+
+    for segment_index in length(checkpoint_indices)-1:-1:1
+        first_state = checkpoint_indices[segment_index]
+        last_state = checkpoint_indices[segment_index + 1]
+        segment_steps = last_state - first_state
+        @views segment_states[:, :, :, 1] .=
+            checkpoints[:, :, :, segment_index]
+        replay = copy(@view segment_states[:, :, :, 1])
+        for local_step in 1:segment_steps
+            global_step = first_state + local_step - 1
+            replay = _mmgnlse_rk4ip_step(
+                replay, parameters,
+                integration_z[global_step],
+                integration_z[global_step + 1], cache)
+            @views segment_states[:, :, :, local_step + 1] .= replay
+        end
+        for local_step in segment_steps:-1:1
+            global_step = first_state + local_step - 1
+            lambda_w = _mmgnlse_rk4ip_step_vjp(
+                @view(segment_states[:, :, :, local_step]),
+                lambda_w, parameters,
+                integration_z[global_step],
+                integration_z[global_step + 1], cache)
+            if haskey(save_lookup, global_step)
+                _mmgnlse_store_discrete_adjoint!(
+                    fields, save_lookup[global_step], lambda_w,
+                    parameters, units)
+            end
+        end
+    end
+
+    return MMGNLSEAdjointSolution(
+        z=saved_z,
+        fields=fields,
+        parameters=parameters,
+        units=units,
+        cache=(
+            backend=:cpu,
+            adjoint_mode=:discrete_rk4ip,
+            forward_solution=source,
+            integration_z=integration_z,
+            forward_step,
+            checkpoint_stride=resolved_stride,
+            checkpoint_z=integration_z[checkpoint_indices],
+            checkpoint_count=length(checkpoint_indices),
+            replay_peak_planes=maximum_segment_steps + 1,
+            frame=:spectral,
+            core=cache,
+        ),
+    )
+end
+
 """
     solve_adjoint(lambda, parameters, dz_adj;
                   forward_solution=nothing, initial_field=nothing,
                   dz_forward=nothing, method=Vern9(), units=:power,
                   saveat=nothing, backend=:cpu, device=nothing,
-                  synchronize=true)
+                  synchronize=true, adjoint_mode=:continuous,
+                  checkpoint_stride=:auto)
 
 Integrate the continuous MMGNLSE adjoint backward in the interaction picture
 with fixed-step `Vern9`. Dispersion and longitudinally varying gain/loss are
@@ -315,6 +655,15 @@ host-array solution representation as the CPU backend and use the same CP
 policy as `solve_mmgnlse`: `:cuda` is the baseline CP implementation,
 `:cuda_cp_optimized` enables rank-agnostic CP optimizations only, and
 `:cuda_optimized` additionally enables rank-tuned choices.
+
+Set `adjoint_mode=:discrete_rk4ip` to differentiate the exact fixed-step
+RK4IP forward map in Float64. Mixed-precision forward solutions are rejected
+because their replay would use a different numerical map. This mode requires
+`dz_adj == dz_forward` (or the nominal
+step of `forward_solution`) and replays bounded segments between uniformly
+spaced checkpoints. `checkpoint_stride=:auto` currently uses at most 256
+forward steps per replay segment. The discrete nonlinear pullback uses the
+same analytic Kerr and Raman VJP as the continuous adjoint.
 """
 function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
                        parameters::MMGNLSEParameters,
@@ -327,7 +676,10 @@ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
                        saveat=nothing,
                        backend=:cpu,
                        device=nothing,
-                       synchronize::Bool=true)
+                       synchronize::Bool=true,
+                       adjoint_mode::Symbol=:continuous,
+                       checkpoint_stride=:auto)
+    selected_adjoint_mode = _mmgnlse_validate_adjoint_mode(adjoint_mode)
     selected_backend = _mmgnlse_validate_solver_backend(backend, parameters)
     selected_backend === :cuda_cp_symmetric_experimental &&
         throw(ArgumentError(
@@ -337,16 +689,23 @@ function solve_adjoint(lambda_terminal::AbstractArray{<:Number,3},
         return _mmgnlse_solve_adjoint_cuda(
             lambda_terminal, parameters, dz_adj;
             forward_solution, initial_field, dz_forward, method, units,
-            saveat, device, synchronize, backend=selected_backend)
+            saveat, device, synchronize, backend=selected_backend,
+            adjoint_mode=selected_adjoint_mode, checkpoint_stride)
     end
     (forward_solution === nothing) ⊻ (initial_field === nothing) ||
         throw(ArgumentError(
             "Supply exactly one of forward_solution or initial_field."))
     isfinite(dz_adj) && dz_adj > 0 || throw(ArgumentError(
         "dz_adj must be finite and positive."))
-    _mmgnlse_validate_adjoint_method(method)
     units in (:power, :photon) || throw(ArgumentError(
         "units must be :power or :photon."))
+    if selected_adjoint_mode === :discrete_rk4ip
+        return _mmgnlse_solve_adjoint_discrete_cpu(
+            lambda_terminal, parameters, dz_adj;
+            forward_solution, initial_field, dz_forward, units, saveat,
+            checkpoint_stride)
+    end
+    _mmgnlse_validate_adjoint_method(method)
 
     forward = if forward_solution !== nothing
         forward_solution isa MMGNLSESolution || throw(ArgumentError(
