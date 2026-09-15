@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FastDifferentiableMMNLO.jl: Fast differentiable routines for classical and quantum multimode nonlinear optics</title>
+  <meta name="description" content="Fast differentiable routines for classical and quantum multimode nonlinear optics.">
+  <link rel="canonical" href="https://nrivera494.github.io/FastDifferentiableMMNLO/">
+  <link rel="stylesheet" href="assets/css/article.css">
+  <script>
+    window.MathJax = {
+      tex: {inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']]},
+      options: {skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']},
+      chtml: {displayAlign: 'center'}
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="site-header">
+    <a class="site-name" href="./">FastDifferentiableMMNLO.jl</a>
+    <nav aria-label="Repository links">
+      <a href="https://github.com/nrivera494/FastDifferentiableMMNLO">GitHub</a>
+      <a href="https://github.com/nrivera494/FastDifferentiableMMNLO/tree/main/example_notebooks">Example notebooks</a>
+    </nav>
+  </header>
+  <main>
+<article aria-labelledby="page-title" id="content"><h1 id="page-title">FastDifferentiableMMNLO.jl: Fast differentiable routines for classical and quantum multimode nonlinear optics</h1>
+<p class="byline">Nicholas Rivera (<a href="mailto:nrivera@cornell.edu">nrivera@cornell.edu</a>)</p>
+<figure id="figure-1">
+<a href="assets/figures/figure-1-many-mode-propagation.png" target="_blank" rel="noopener" aria-label="Open Figure 1 at full resolution"><img src="assets/figures/figure-1-many-mode-propagation.png" style="width:1015px;max-width:100%;height:auto" alt="Propagation with 1035 spatial modes" width="5400" height="3085" decoding="async">
+</a><figcaption><p><strong>Figure 1: Practical many-mode simulations of strongly nonlinear pulse dynamics.</strong> A 250 fs pulse propagates through 1 m of graded-index fiber in a simulation at a step size of 100 microns, retaining <strong>1,035 spatial modes</strong>, <strong>with 120 modes populated at launch</strong>. The upper panels show the initial and final spatial intensity, summed over frequency, and the difference between two CP approximations (the trick that makes the code fast). The lower panel compares spectra of the first 120 modes at tensor tolerances ε = 10⁻¹ and 10⁻³. The displayed propagation times are 0.8 and 1.9 hours on an NVIDIA H100 SXM GPU. This example <em>does not make use of the circular symmetry</em> and illustrates a generic “compression” method for making the simulations fast.</p></figcaption>
+</figure>
+<h2 id="overview-of-the-code">1. Overview of the code</h2>
+<p>This page outlines a code that I have been developing which, broadly speaking, gives access to simulations of nonlinear multimode dynamics at very high mode counts, with demonstrations of nontrivial hour-scale simulations involving over a thousand modes. Figure 1 above shows this example. The code has two main routines for solving the classical multimode nonlinear Schrödinger equation: a modal representation routine and a full-field routine. The modal representation solves for modal envelopes <span class="math inline">\(A_{m}(t)\)</span> such that their modulus squared gives the instantaneous power in each mode.</p>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[\frac{\partial{\widetilde{A}}_{m}}{\partial z} = \left\lbrack {iD_{m}(\Omega) + \frac{g_{m}(\Omega,z) - a_{m}(\Omega,z)}{2}} \right\rbrack{\widetilde{A}}_{m} + i\kappa(\Omega){\widetilde{C}}_{m}\]</span></div>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[D_{m}(\Omega) = \beta_{m}(\omega_{0} + \Omega) - \beta_{{ref},0} - \beta_{{ref},1}\Omega,\kappa(\Omega) = \frac{n_{2}(\omega_{0} + \Omega)}{c}w(\Omega)\]</span></div>
+<p>with the nonlinear response given by</p>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[C_{m}(t) = \sum_{n,p,q}^{}{S_{mnpq}A_{n}(t)\left\lbrack {(1 - f_{R})A_{p}(t)A_{q}^{*}(t) + f_{R}\left( {h_{R}*(A_{p}A_{q}^{*})} \right)(t)} \right\rbrack}\]</span></div>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[(h_{R}*X)(t) = \int_{0}^{\infty}{h_{R}(\tau)X(t - \tau)d\tau}\]</span></div>
+<p>In other words, the code considers dispersion (<em>D</em>), <em>linear</em> gain and loss (<em>g,a</em>) [no corresponding rate-equation dynamics], and nonlinearity (instantaneous Kerr, Raman, and self-steepening). A full table of symbols is provided in Section 4. An introduction to this equation, and the next equation, can be found in this review article [Wright2017]. There is additional support for polarization. Rate-equation dynamics for the gain are not yet implemented.</p>
+<p>The multimode generalized nonlinear Schrödinger equation (MMGNLSE) above, while often considered in the context of fibers, is equally valid for other waveguide geometries, and the code supports user-supplied dispersion and nonlinear overlaps, giving support for generic guided structures. The modal representation above has support for CPU and GPU execution.</p>
+<p>The code also contains a 3+1D solver (GPU only). The relevant equation for the complex electric field envelope <span class="math inline">\(\mathcal{A(}x,y,z,t)\)</span> is:</p>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[\frac{\partial\mathcal{A}}{\partial z} = \left\lbrack {i\widehat{D} - \frac{\widehat{a}}{2} + \frac{i}{2\beta_{0}}\nabla_{\perp}^{2} + iV(x,y)} \right\rbrack\mathcal{A} + i\frac{n_{2}\omega_{0}}{c}\left( {1 + \frac{i}{\omega_{0}}\partial_{t}} \right)C_{ff}\]</span></div>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[C_{ff} = \left\lbrack {(1 - f_{R})|\mathcal{A}|^{2} + f_{R}(h_{R}*|\mathcal{A}|^{2})} \right\rbrack\mathcal{A}\]</span></div>
+<h3 id="adjoints-and-quantum-noise">1.1 Adjoints and quantum noise</h3>
+<p>This code also has support for computing <em>gradients</em> of various observables with respect to the initial conditions. Examples of observables include energy (or photon number) of arbitrarily filtered outputs (frequency-domain filter, spatial aperture, etc.) or pulse timing. In addition to providing information about sensitivity to initial conditions and gradient information which could be used for optimization (e.g., controlling some output through a spatial light modulator applied to an input pulse), these gradients are important for calculating <em>quantum noise response</em> in a linearized quantum noise approximation. This is formalized through <em>quantum sensitivity analysis</em> [Uddin2025, Rivera2025]. Denoting the collection of all initial amplitudes as <span class="math inline">\(\mathbf{\alpha}_{in},\mathbf{\alpha}_{in}^{*}\)</span>, we can say <span class="math inline">\(X_{out} = X_{out}\left( \mathbf{\alpha}_{in},\mathbf{\alpha}_{in}^{*} \right)\)</span> and its variance is given in a linearized quantum noise approximation as:</p>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[\left( \Delta X_{out} \right)^{2} = \left( \partial X_{out}/\partial\mathbf{\alpha}_{in}\ \partial X_{out}/\partial\mathbf{\alpha}_{in}^{\mathbf{*}} \right)\begin{pmatrix}
+\left\langle \delta\mathbf{a}\delta\mathbf{a} \right\rangle &amp; \left\langle \delta\mathbf{a}\delta\mathbf{a}^{\mathbf{\dagger}} \right\rangle \\
+\left\langle \delta\mathbf{a}^{\mathbf{\dagger}}\delta\mathbf{a} \right\rangle &amp; \left\langle \delta\mathbf{a}^{\mathbf{\dagger}}\delta\mathbf{a}^{\mathbf{\dagger}} \right\rangle
+\end{pmatrix}_{in}\begin{pmatrix}
+\partial X_{out}/\partial\mathbf{\alpha}_{in} \\
+\partial X_{out}/\partial\mathbf{\alpha}_{in}^{\mathbf{*}}
+\end{pmatrix}\]</span></div>
+<p>The correlation matrix (with entries such as <span class="math inline">\(\left\langle \delta\mathbf{a}\delta\mathbf{a} \right\rangle\)</span>) contains the quantum statistics of the initial fields (e.g., coherent, squeezed, thermal, multimode entangled). For a multimode coherent initial state, the covariance expression above simplifies to:</p>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[\left( \Delta X_{out} \right)^{2} = \sum_{k}^{}\left| \frac{\partial X_{out}}{\partial\alpha_{in,k}(0)} \right|^{2} = \left\| \nabla_{\alpha_{in}}X_{out} \right\|^{2}.\]</span></div>
+<p>The code provides support for computing the relevant gradients through an <em><strong>adjoint equation</strong></em> (implemented only for the modal representation). In addition to dealing with initial condition noise (the equations above), the code also provides routines for computing noise due to <em>distributed noise sources</em> (Langevin terms). The code allows for computing added noise due to gain, loss, and Raman noise. The treatment can be straightforwardly extended to other noise sources. As an example of what the code allows, we have tested the distributed noise implementation against one of the few analytical predictions that exist for quantum noise in nonlinear optics: the timing jitter of an <span class="math inline">\(N = 1\)</span> soliton due to vacuum fluctuations, gain (Gordon-Haus) noise, and Raman noise. It is compared to predictions of soliton perturbation theory [Corney2001].</p>
+<figure id="figure-2">
+<p><a href="assets/figures/figure-2-soliton-timing-noise.png" target="_blank" rel="noopener" aria-label="Open Figure 2 at full resolution"><img src="assets/figures/figure-2-soliton-timing-noise.png" style="width:682px;max-width:100%;height:auto" alt="Soliton timing noise checked against theory" width="489" height="239" decoding="async" loading="lazy"></a></p>
+<figcaption><p><strong>Figure 2: Adjoint-based quantum sensitivity analysis (QSA, markers) is compared with soliton perturbation theory (SPT, lines) for a fundamental soliton.</strong> We compare contributions from input vacuum noise, Gordon–Haus noise, and distributed Raman noise. L/Ld is the fiber length in units of the dispersion length. The vertical axis is pulse-timing variance in s².</p></figcaption>
+</figure>
+<p>In cases where a linearized quantum noise approximation is insufficient, the code supports propagating ensembles of initial conditions with shot noise or excess phase-insensitive noise. An example is shown below, where we propagate a 20-mode soliton (105 modes retained) over a stochastic ensemble with 60 dB wideband excess noise. 120 trajectories are evaluated (it takes six hours with our code; taking advantage of more symmetry, it can be shorter).</p>
+<figure id="figure-3">
+<a href="assets/figures/figure-3-stochastic-soliton-fission.png" target="_blank" rel="noopener" aria-label="Open Figure 3 at full resolution"><img src="assets/figures/figure-3-stochastic-soliton-fission.png" style="width:572px;max-width:100%;height:auto" alt="An ensemble of multimode soliton trajectories" width="2200" height="2005" decoding="async" loading="lazy">
+</a><figcaption><p><strong>Figure 3:</strong> (a) Time profile of the initial pulse in the lowest mode for 120 shots with a pulse-energy fluctuation of 0.1% (implemented by independent phase-insensitive white noise with a Fano factor of 60 dB). (b) Time profile of the highest-peak-power soliton that broke off of the initial pulse, shown for modes 1, 2, and 6, as well as the average time profile over 120 shots. 105 modes are retained in the simulation, which involves an initial twenty-mode (modes 1–20) launch propagating through one meter of fiber.</p></figcaption>
+</figure>
+<h2 id="capabilities-of-the-code-through-worked-examples">2. Capabilities of the code through worked examples</h2>
+<p>There are many more examples than outputs shown in this overview. All examples correspond to a Jupyter notebook in the repository that you can play with. A summary of the capabilities of this code is given in the table below. As a note of caution: the GPU examples are based on my personal GPU workflow (interactive Jupyter notebook launched from VS Code after connecting via SSH to a university HPC cluster). You will want to adapt these examples to your workflow.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Capabilities exercised by the example notebooks">
+<table style="width:100%;" class="capabilities" aria-label="Capabilities exercised by the example notebooks">
+<colgroup>
+<col style="width: 15%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+<col style="width: 8%">
+</colgroup>
+<thead>
+<tr>
+<th><strong>Capability / feature</strong></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/squeezing_spectral_filter.ipynb">Raman soliton filtering</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/soliton_jitter.ipynb">Soliton jitter</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/step_index_squeezing.ipynb">Step-index squeezing</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/om4_1030.ipynb">Normal-dispersion CP</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/birefringent_mm_soliton.ipynb">Birefringent solitons</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/gpu_examples/stochastic_example_gpu.ipynb">Stochastic fission</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/gpu_examples/cp_decomp_modecount_gpu.ipynb">CP mode-count scaling</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/gpu_examples/full_field_vs_cp_gpu.ipynb">Full-field vs. CP</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/gpu_examples/manymode_prop_gpu.ipynb">1,035-mode propagation</a></th>
+<th style="text-align: center;"><a href="https://github.com/nrivera494/FastDifferentiableMMNLO/blob/c039efe06049072780139f707febf2012ae3f9d9/example_notebooks/gpu_examples/cp_decomposition_30mode_soliton_gpu.ipynb">30-mode CP benchmark</a></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dense forward</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td>CP forward</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td>Full-field forward</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Dense adjoint</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>CP adjoint</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Stochastic</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Distributed noise</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Time</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td>Spatial modes</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td>Polarization</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>GPU</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td>External validity</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td>Internal validity</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Table 1: Capabilities exercised by the example notebooks.</strong> A checkmark indicates that an example demonstrates a capability; a dash means that the particular example does not demonstrate that capability. Column headers link to the notebooks. Internal validity denotes comparisons within the package or checks of limiting cases; external validity denotes comparisons with independent code or analytical predictions.</p>
+<h2 id="why-is-it-fast">3. Why is it fast?</h2>
+<p>The code uses two sources of speedup. The largest contribution at high mode counts, which applies to both CPU and GPU usage, comes from a new algorithm based on a low-rank representation of the four-wave mixing tensor <span class="math inline">\(S\ \)</span>which appears in the modal representation. A second large speedup comes from using GPU-based routines for simulating the multimode nonlinear Schrödinger equation, as is also available in tools from the Wise group at Cornell [MMTools]. Unlike existing codebases which use a massively parallel algorithm, this codebase simply uses a CUDA-accelerated RK4IP algorithm.</p>
+<p>The core speedup is based on a CANDECOMP/PARAFAC (canonical polyadic decomposition [Kolda2009]) of the nonlinear tensor as</p>
+<div class="equation" tabindex="0" role="region" aria-label="Equation"><span class="math display">\[S_{mnpq} \approx {\widehat{S}}_{mnpq} = \sum_{r = 1}^{R}{\lambda_{r}U_{mr}^{(1)}U_{nr}^{(2)}U_{pr}^{(3)}U_{qr}^{(4)}}\]</span></div>
+<p>To cut a long story short, for a variety of index profiles, including GRIN, step-index, and a fiber with broken symmetry, the simulation complexity goes from quartic to approximately quadratic. This is illustrated below for these three fibers by evaluating the time to carry out one z-step of the differential equation. The timing speedup is large. At 1,000 modes, the speedup on a single GPU of the CP algorithm versus the standard algorithm (same hardware) is estimated to be roughly 10,000-fold.</p>
+<figure id="figure-4">
+<p><a href="assets/figures/figure-4-compression-and-runtime.png" target="_blank" rel="noopener" aria-label="Open Figure 4 at full resolution"><img src="assets/figures/figure-4-compression-and-runtime.png" style="width:931px;max-width:100%;height:auto" alt="Compression and propagation scaling" width="2200" height="1091" decoding="async" loading="lazy"></a></p>
+<figcaption><p><strong>Figure 4: Compression of the four-wave-mixing tensor.</strong> CP rank and runtime as a function of mode count. (a) CP rank leading to reconstruction of the four-wave mixing tensor at different error levels for a step-index fiber, a GRIN fiber, and a fiber with a perturbed elliptical index profile (index profile and fundamental mode shown in inset; the perturbations are regions of lower index). Fits of rank versus mode count are of the form <span class="math inline">\(R(M,\epsilon) \sim \ M^{b}\)</span> showing a roughly linear scaling of rank with mode count in all cases. (b) Time to execute one propagation step of the MMGNLSE for the different systems, using the CP-decomposed tensor and the standard dense approach (pink). Curves beyond 120 modes are an extrapolation. Fits are to the form <span class="math inline">\(t(M,\epsilon)\  = \ c_{0}\  + \ c_{1}M^{b}\)</span>.</p></figcaption>
+</figure>
+<p>The CP approach is implemented on CPU and GPU. An example notebook, titled “om4_1030.ipynb”, illustrates the point – it propagates a 500 fs, 50 kW pulse at 1030 nm center wavelength through 1 m of GRIN fiber. For just <em>six</em> modes, the standard quartic-scaling modal simulation took 55 minutes for one meter of propagation with a 100 µm step size and 8,192 time points. A twenty-one-mode simulation is projected to take six days on a single CPU core. With the CP compression approach, the six-mode simulation takes 1.5 minutes (36× speedup), and the twenty-one-mode simulation takes 15 minutes and achieves essentially full accuracy (projected 540× speedup over the quartic algorithm).</p>
+<p>Traditionally, the full-field representation is used in place of modal solvers, even when all the physics lives in a guided-mode subspace, because of the poor scaling of the modal representation with mode count. The modal representation uses a new algorithm based on tensor decomposition of the nonlinear tensor <span class="math inline">\(S_{mnpq}\)</span> that converts the typical quartic scaling to an approximate quadratic scaling, without relying on special symmetries. As a result, we often find that a modal representation can outperform the full-field representation at <em>matched accuracy</em>. A dramatic example is shown in the figure below.</p>
+<figure id="figure-5">
+<a href="assets/figures/figure-5-modal-and-full-field.png" target="_blank" rel="noopener" aria-label="Open Figure 5 at full resolution"><img src="assets/figures/figure-5-modal-and-full-field.png" style="width:512px;max-width:100%;height:auto" alt="Comparing three propagation representations" width="2200" height="2043" decoding="async" loading="lazy">
+</a><figcaption><p><strong>Figure 5: Benchmarking CP decomposition against full-field and dense modal solvers.</strong> Modal spectra predicted by a modal and full-field representation, designed such that the relative norm error in the modal spectra is roughly <span class="math inline">\(5\  \times \ 10^{- 4}\)</span> between CP and dense and between full-field and dense. 150 modes are retained in the simulation, which involves an initial ten-mode (modes 6–15) launch in step-index fiber propagating through 0.25 meters of fiber.</p></figcaption>
+</figure>
+<h2 id="table-of-symbols">4. Table of symbols</h2>
+<p>Symbols used in the equations, captions and figure labels are defined below. Tildes denote temporal Fourier transforms; hats denote operators or the CP approximation, as specified in each row. This table was generated by GPT-6 Astra.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Table of symbols">
+<table class="symbols" aria-label="Table of symbols">
+<colgroup>
+<col style="width: 28%">
+<col style="width: 71%">
+</colgroup>
+<thead>
+<tr>
+<th><strong>Symbol</strong></th>
+<th><strong>Meaning</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="symbol-group">
+<th colspan="2" scope="colgroup"><strong>Coordinates, fields and indices</strong></th>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[z,\ L\]</span></td>
+<td>Propagation coordinate and total propagation length; measured in meters.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[t,\ \tau\]</span></td>
+<td>Retarded pulse time and the delay variable in the Raman convolution. The code uses picoseconds for time.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[x,\ y\]</span></td>
+<td>Transverse spatial coordinates.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\omega_{0},\ \Omega\]</span></td>
+<td>Carrier angular frequency and angular-frequency offset from the carrier. The absolute angular frequency is ω₀ + Ω.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\lambda\]</span></td>
+<td>Optical wavelength, shown in nanometers in the spectra. Distinct from the CP weight λᵣ.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[m,n,p,q\]</span></td>
+<td>Modal indices in the overlap tensor and modal propagation equation; spatial-mode indices for the scalar equations shown.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[A_{m}(t),\ {\widetilde{A}}_{m}\]</span></td>
+<td>Modal envelope and its temporal Fourier transform. |Aₘ(t)|² is instantaneous power in mode m; propagation-distance arguments are suppressed.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[A(x,y,z,t)\]</span></td>
+<td>Full-field envelope, with intensity normalization: |A|² is optical intensity, rather than power in a single spatial mode.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[I({in}),\ I({out})\]</span></td>
+<td>Spectrally summed input and output spatial intensities in Figure 1. max(I(in)) is the peak input value used for the displayed normalization.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[|E|\]</span></td>
+<td>Magnitude of the transverse mode field in the mode-profile inset of Figure 4.</td>
+</tr>
+<tr class="symbol-group">
+<th colspan="2" scope="colgroup"><strong>Propagation and nonlinear response</strong></th>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[D_{m}(\Omega)\]</span></td>
+<td>Modal dispersion multiplier after subtracting the reference carrier phase and group delay; units of inverse length.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\beta_{m}(\omega)\]</span></td>
+<td>Propagation constant of mode m at angular frequency ω; units of inverse length.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\beta_{{ref},0},\ \beta_{{ref},1}\]</span></td>
+<td>Reference carrier propagation constant and reference group delay per unit length. They define the phase and moving-time frame.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\beta_{0}\]</span></td>
+<td>Reference carrier propagation constant used in the full-field diffraction term.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[g_{m},\ a_{m}\]</span></td>
+<td>Modal power-gain and power-attenuation coefficients. Their contribution to the envelope is (gₘ − aₘ)/2.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\widehat{D},\ \widehat{a}\]</span></td>
+<td>Temporal dispersion and power-attenuation operators in the full-field equation; applied as spectral multipliers.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\nabla_{\perp}^{2},\ \partial_{t}\]</span></td>
+<td>Transverse Laplacian (the sum of second derivatives in x and y) and partial derivative with respect to pulse time.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[V(x,y)\]</span></td>
+<td>Real transverse index potential in the full-field equation; represents refractive-index confinement and has units of inverse length.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[n_{2},\ c\]</span></td>
+<td>Nonlinear refractive-index coefficient and speed of light in vacuum, respectively.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\kappa(\Omega)\]</span></td>
+<td>Frequency-dependent nonlinear prefactor, including the material coefficient, self-steepening factor and numerical spectral window.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[w(\Omega)\]</span></td>
+<td>Dimensionless numerical spectral-edge taper for the nonlinear term. Setting w = 1 gives the unwindowed expression.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[C_{m}(t),\ {\widetilde{C}}_{m}\]</span></td>
+<td>Modal nonlinear response and its temporal Fourier transform, including instantaneous Kerr and delayed Raman contributions.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[C_{ff}\]</span></td>
+<td>Corresponding local nonlinear response in the full-field representation; “ff” denotes full field.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[f_{R}\]</span></td>
+<td>Fraction of the nonlinear response assigned to the delayed Raman contribution; dimensionless.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[h_{R}(t)\]</span></td>
+<td>Causal Raman response kernel, normalized to unit time integral. Its units are inverse time.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[(h_{R}*X)(t),\ X(t)\]</span></td>
+<td>Causal temporal convolution with the Raman kernel. Here X is a generic time-dependent function, such as a product of field envelopes.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[( \cdot )^{*},\ *\]</span></td>
+<td>A superscript star denotes complex conjugation; a star between the Raman kernel and a function denotes convolution.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[i\]</span></td>
+<td>Imaginary unit, satisfying i² = −1.</td>
+</tr>
+<tr class="symbol-group">
+<th colspan="2" scope="colgroup"><strong>Adjoints and quantum noise</strong></th>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\alpha_{in},\ \alpha_{in}^{*}\]</span></td>
+<td>Collections of mean input amplitudes and their complex conjugates, in photon normalization. They are treated as independent variables when taking complex derivatives; (0) denotes the input plane.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[k\]</span></td>
+<td>Index over the discrete input degrees of freedom, including frequency, spatial mode and polarization where retained.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[X_{out},\ (\Delta X_{out})^{2}\]</span></td>
+<td>Output observable and its variance in the linearized noise expressions.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[a,\ a^{\dagger}\]</span></td>
+<td>Annihilation and creation operators for the input optical degrees of freedom. The dagger denotes the Hermitian adjoint.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\delta a,\ \delta a^{\dagger}\]</span></td>
+<td>Fluctuations of those operators about their input-state mean values.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\langle \cdot \rangle_{in}\]</span></td>
+<td>Quantum expectation in the input state. The correlation-matrix blocks contain ordered second moments of the input fluctuations.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\nabla_{\alpha_{in}}X_{out}\]</span></td>
+<td>Vector of derivatives of the output observable with respect to the input amplitudes, evaluated on the mean trajectory. Its squared Euclidean norm gives the coherent-input variance shown.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[N\]</span></td>
+<td>Soliton order; N = 1 denotes a fundamental soliton.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[L_{d},\ L/L_{d}\]</span></td>
+<td>Dispersion length and propagation length normalized by that scale, as used in Figure 2.</td>
+</tr>
+<tr class="symbol-group">
+<th colspan="2" scope="colgroup"><strong>Tensor compression and scaling fits</strong></th>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[S_{mnpq},\ {\widehat{S}}_{mnpq}\]</span></td>
+<td>Four-mode nonlinear overlap tensor and its CP approximation, respectively.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[M\]</span></td>
+<td>Number of retained spatial modes in the mode-count and scaling comparisons.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[R,\ R(M,\epsilon)\]</span></td>
+<td>Number of retained CP components (CP rank), also written as a function of mode count and tensor-error tolerance.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[r\]</span></td>
+<td>CP-component index, running from 1 to R.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\lambda_{r}\]</span></td>
+<td>Weight of CP component r. This λ carries a component index and does not denote optical wavelength.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[U_{mr}^{(1)},\ldots,U_{qr}^{(4)}\]</span></td>
+<td>Entries of the four factor matrices in the CP decomposition. Each superscript labels one tensor axis, and column r belongs to component r.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[\epsilon,\ \varepsilon\]</span></td>
+<td>Two typographic forms of the relative Frobenius reconstruction error of the overlap tensor, used to specify the CP approximation tolerance.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[b\]</span></td>
+<td>Fitted power-law exponent. Rank and runtime fits use separate fitted values.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="math display">\[t(M,\epsilon),\ c_{0},\ c_{1}\]</span></td>
+<td>Runtime per propagation step and its fitted coefficients in Figure 4. Here t denotes computational time, distinct from retarded pulse time.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="role-of-ai-in-developing-the-code">5. Role of AI in developing the code</h2>
+<p>Coding agents were used to write essentially every line of code in this solver (with substantial input from GPT-5.5, GPT-5.6 Sol, and Claude Fable 5). My role was to steer every part of the development and validate the code: to choose the routines to be implemented, to design the interface for calling routines, and to develop the examples used to rigorously test the code against my own expectations (as well as other public codes). All example notebooks in the repository were chosen and hand-written by me following the AI's documentation, to test the usability and accuracy of the written code. This work started on May 9 and a “finished” public checkpoint was released on August 27. In this subsection, I will primarily discuss the high-level workflow, and how I probed the validity of the resulting code.</p>
+<p>Fortunately, there were several prior implementations that could be used (a) to anchor a unified implementation and (b) provide measures of external validity and internal validity for the code. Our group had previously built forward and adjoint solvers for the multimode nonlinear Schrödinger equation using a dense RK4IP algorithm [MMNoise]. The forward solver, however, had less capability than a state-of-the-art dedicated classical solver [MMTools], which has more comprehensive support for polarized multimode propagation with anisotropic Raman scattering models. The first task with GPT-5.5 (Codex) was to rewrite the dense RK4IP MMGNLSE solver to allow for polarized nonlinear propagation with more complex Raman scattering models. Importantly, I imposed the constraint that the code had to be differentiable using standard Julia packages (ForwardDiff.jl and Zygote.jl) which meant that existing codes could not be directly ported over. Once this was working (verified by reproducing examples from the existing implementations), I steered it to implement the adjoint equation (to get gradients with respect to initial conditions) corresponding to the forward equation. The adjoint was tested by comparing its outputs to reverse-mode differentiation of the forward solver, as well as a stochastic forward implementation. After having working dense forward and adjoint solvers, I steered Codex to write functions to perform the CP decomposition given above. Interestingly, despite existing packages, the AI implementation provided clear performance improvement (the main improvement was using a low-rank higher-error compression to warm start a higher-rank lower-error compression). The CP decomposition could straightforwardly be tested by comparing results of low-error tensor compressions with the previously implemented dense solver. Once this was all done, Codex wrote CUDA implementations of the dense and CP forward and adjoint solvers. These were checked against the CPU solvers <em>and</em> a held-out simulation of 30-mode soliton propagation from the Wise group at Cornell which relies on a different implementation from those previously mentioned (the comparison is shown in the 30-mode CP benchmark). The last major step was to implement a full-field solver to compare timings against the modal simulation. Its validity is assessed by comparison to the modal representation for a case where the dynamics live in a fixed modal subspace. Along the way, the code was refactored and various CPU and GPU implementations were optimized.</p>
+<p>It is important to mention that as of today, despite coding agents’ prolific code-writing abilities, they were not able to execute this project autonomously, and failed already at the first step in the process (transcribing the forward solver in a differentiable way). Major errors accumulated in almost every part of the development that had to be manually caught and corrected. Unsurprisingly, “non-standard” implementations (specifically almost anything to do with adjoints with multimode Raman, quantum noise normalizations, and determining when a simulation result is physical) required considerable input. Models also tend to not engage in too much higher-order thinking and only make certain longer-term considerations when prompted rather than proactively (e.g., related to memory performance, handling large-mode regimes (outside of the original tests), and performance). Further, they tend to lead to feature creep, which led to a proliferation of function arguments which were hard for a human user to track. This also required active management (by refactoring the code multiple times to preserve interpretability and usage). Nevertheless, I find that coding agents were an unambiguous net-positive, particularly from the runtime and memory performance aspects.</p>
+<h2 id="hardware-note">6. Hardware Note</h2>
+<p>The reported CPU timings were measured on a single thread of a 2025 MacBook Pro. GPU timings reported used an NVIDIA H100 SXM GPU.</p>
+<h2 id="citation">7. Citation</h2>
+<p>Rivera, N. FastDifferentiableMMNLO.jl. Version v0, Zenodo, 24 June 2026, https://doi.org/10.5281/zenodo.20829200.</p>
+<h2 id="references">8. References</h2>
+<p id="ref-wright2017">[Wright2017] Wright, Logan G., et al. "Multimode nonlinear fiber optics: massively parallel numerical solver, tutorial, and outlook." <em>IEEE Journal of Selected Topics in Quantum Electronics</em> 24.3 (2017): 1-16.</p>
+<p id="ref-uddin2025">[Uddin2025] <mark>Zia Uddin, Shiekh, Nicholas Rivera, Devin Seyler, Jamison Sloan, Yannick Salamin, Charles Roques-Carmes, Shutao Xu, Michelle Y. Sander, Ido Kaminer, and Marin Soljačić. "Noise-immune quantum correlations of intense light." <em>Nature Photonics</em> (2025): 1-7.</mark></p>
+<p id="ref-rivera2025">[Rivera2025] <mark>Rivera, Nicholas, Shiekh Zia Uddin, Jamison Sloan, and Marin Soljačić. "Ultra-broadband and passive stabilization of ultrafast light sources by quantum light injection." <em>Nanophotonics</em> 14, no. 11 (2025): 1857-1864.</mark></p>
+<p id="ref-corney2001">[Corney2001] Corney, Joel Frederick, and P. D. Drummond. "Quantum noise in optical fibers. II. Raman jitter in soliton communications." <em>Journal of the Optical Society of America B</em> 18.2 (2001): 153-161.</p>
+<p id="ref-kolda2009">[Kolda2009] Kolda, Tamara G., and Brett W. Bader. "Tensor decompositions and applications." <em>SIAM Review</em> 51.3 (2009): 455-500.</p>
+<p id="ref-mmnoise">[MMNoise] <a href="https://github.com/michaelhorodynski/MultiModeNoise.jl">https://github.com/michaelhorodynski/MultiModeNoise.jl</a></p>
+<p id="ref-mmtools">[MMTools] <a href="https://github.com/AaHaHaa/MMTools">https://github.com/AaHaHaa/MMTools</a></p>
+<h2 id="acknowledgements">9. Acknowledgements</h2>
+<p>The author acknowledges start-up funding from the School of Applied and Engineering Physics at Cornell University. The author acknowledges fruitful conversations with Michael Horodynski, Ido Kaminer, Yi-Hao Chen, Myungjoon Kim, and Frank Wise. The author also acknowledges early benchmark data generated by Myungjoon Kim that was used to validate the code. For compute: the author acknowledges the Cornell University Center for Advanced Computing for access to the Seneca High-Performance Computing cluster. AI models were used heavily as coding assistants during the execution time of this project (GPT-5.5, GPT-5.6 Sol, Claude Fable 5, and GPT-6 Astra). Section 5, “Role of AI in developing the code,” discusses how the code was validated; the examples in the public repository were all written by the author. The author also discussed and developed various mathematical results in collaboration with these models. GPT-6 Astra was used to help collect figures and equations for assembling this GitHub page, as well as assembling various tables. Figure captions were drafted by GPT-6; the remainder of the document was written by me.</p>
+</article>
+
+  </main>
+</body>
+</html>

@@ -1,5 +1,5 @@
 title: FastDifferentiableMMNLO.jl
-description: Fast and differentiable simulations of ultrafast multimode nonlinear dynamics
-theme: jekyll-theme-minimal
-show_downloads: true
-markdown: kramdown
+description: Fast differentiable routines for classical and quantum multimode nonlinear optics
+url: https://nrivera494.github.io
+baseurl: /FastDifferentiableMMNLO
+repository: nrivera494/FastDifferentiableMMNLO
